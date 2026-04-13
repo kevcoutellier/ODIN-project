@@ -1,0 +1,49 @@
+# Odin Configuration
+# Zero Trust AI Agent — Secured by design, trusted by network.
+
+agent:
+  name: Odin
+  description: >
+    I am Odin, a Zero Trust AI agent by AgentLayers.
+    I am secured by design with IFC, sandboxing, and policy enforcement.
+    I verify everything and trust nothing by default.
+
+llm:
+  privileged:
+    provider: ollama
+    model: gemma4
+    baseUrl: http://localhost:11434
+    maxTokens: 4096
+    temperature: 0.7
+  quarantined:
+    provider: ollama
+    model: gemma4
+    baseUrl: http://localhost:11434
+    maxTokens: 2048
+    temperature: 0.3
+
+memory:
+  dbPath: ./odin-memory.db
+  maxEntries: 10000
+
+security:
+  defaultRing: 0
+  requireHumanApproval:
+    - shell_exec
+    - code_exec
+    - file_delete
+  maxDailyCalls: 1000
+  sessionTtlSeconds: 3600
+
+trust:
+  agentLayersBaseUrl: https://api.agent-layers.com
+  selfAuditIntervalSeconds: 300
+  trustDecayHalfLifeDays: 7
+  # agentLayersApiKey: set via AGENTLAYERS_API_KEY env var
+
+gateway:
+  type: cli
+
+observability:
+  auditLogPath: ./odin-audit.log
+  dashboardPort: 3333
