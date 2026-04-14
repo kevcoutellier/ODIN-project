@@ -31,7 +31,7 @@ export interface TaintedData<T = unknown> {
 
 // ─── LLM Router ───
 
-export type LLMProvider = 'anthropic' | 'openai' | 'ollama';
+export type LLMProvider = 'anthropic' | 'openai' | 'ollama' | 'none';
 
 export interface LLMConfig {
   provider: LLMProvider;

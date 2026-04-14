@@ -14,16 +14,16 @@ const DEFAULT_CONFIG: OdinConfig = {
   },
   llm: {
     privileged: {
-      provider: 'ollama',
-      model: 'gemma4',
-      baseUrl: 'http://localhost:11434',
+      provider: 'none',
+      model: 'none',
+      baseUrl: '',
       maxTokens: 4096,
       temperature: 0.7,
     },
     quarantined: {
-      provider: 'ollama',
-      model: 'gemma4',
-      baseUrl: 'http://localhost:11434',
+      provider: 'none',
+      model: 'none',
+      baseUrl: '',
       maxTokens: 2048,
       temperature: 0.3,
     },
@@ -109,24 +109,45 @@ export async function loadConfig(configPath?: string): Promise<OdinConfig> {
   }
 
   // Environment variable overrides
-  if (process.env.ANTHROPIC_API_KEY) {
-    config.llm.privileged.apiKey = process.env.ANTHROPIC_API_KEY;
-    config.llm.quarantined.apiKey = process.env.ANTHROPIC_API_KEY;
-  }
-  if (process.env.OPENAI_API_KEY && config.llm.privileged.provider === 'openai') {
-    config.llm.privileged.apiKey = process.env.OPENAI_API_KEY;
-  }
   if (process.env.AGENTLAYERS_API_KEY) {
     config.trust.agentLayersApiKey = process.env.AGENTLAYERS_API_KEY;
   }
+
+  // Explicit provider override
   if (process.env.ODIN_LLM_PROVIDER) {
-    const allowed = ['anthropic', 'openai', 'ollama'] as const;
+    const allowed = ['anthropic', 'openai', 'ollama', 'none'] as const;
     const provider = process.env.ODIN_LLM_PROVIDER;
     if (!allowed.includes(provider as any)) {
       throw new Error(`Invalid ODIN_LLM_PROVIDER "${provider}". Allowed values: ${allowed.join(', ')}`);
     }
     config.llm.privileged.provider = provider as (typeof allowed)[number];
     config.llm.quarantined.provider = provider as (typeof allowed)[number];
+  }
+
+  // Auto-detect LLM from API keys (only if still 'none' after config file + env override)
+  if (config.llm.privileged.provider === 'none') {
+    if (process.env.ANTHROPIC_API_KEY) {
+      config.llm.privileged = { provider: 'anthropic', model: 'claude-sonnet-4-20250514', apiKey: process.env.ANTHROPIC_API_KEY, maxTokens: 4096, temperature: 0.7 };
+      config.llm.quarantined = { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', apiKey: process.env.ANTHROPIC_API_KEY, maxTokens: 2048, temperature: 0.3 };
+    } else if (process.env.OPENAI_API_KEY) {
+      config.llm.privileged = { provider: 'openai', model: 'gpt-4o', apiKey: process.env.OPENAI_API_KEY, maxTokens: 4096, temperature: 0.7 };
+      config.llm.quarantined = { provider: 'openai', model: 'gpt-4o-mini', apiKey: process.env.OPENAI_API_KEY, maxTokens: 2048, temperature: 0.3 };
+    } else if (process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST) {
+      const baseUrl = process.env.OLLAMA_BASE_URL ?? process.env.OLLAMA_HOST ?? 'http://localhost:11434';
+      config.llm.privileged = { provider: 'ollama', model: 'gemma3', baseUrl, maxTokens: 4096, temperature: 0.7 };
+      config.llm.quarantined = { provider: 'ollama', model: 'gemma3', baseUrl, maxTokens: 2048, temperature: 0.3 };
+    }
+    // Otherwise stays 'none' — agent boots without LLM
+  } else {
+    // Apply API keys to configured provider
+    if (process.env.ANTHROPIC_API_KEY && config.llm.privileged.provider === 'anthropic') {
+      config.llm.privileged.apiKey = process.env.ANTHROPIC_API_KEY;
+      config.llm.quarantined.apiKey = process.env.ANTHROPIC_API_KEY;
+    }
+    if (process.env.OPENAI_API_KEY && config.llm.privileged.provider === 'openai') {
+      config.llm.privileged.apiKey = process.env.OPENAI_API_KEY;
+      config.llm.quarantined.apiKey = process.env.OPENAI_API_KEY;
+    }
   }
 
   return config;

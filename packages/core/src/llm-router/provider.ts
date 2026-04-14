@@ -215,11 +215,32 @@ export class OllamaAdapter implements LLMProviderAdapter {
   }
 }
 
+export class NullAdapter implements LLMProviderAdapter {
+  readonly provider = 'none';
+  readonly model = 'none';
+
+  async chat(_messages: LLMMessage[], _tools?: ToolDefinition[]): Promise<LLMResponse> {
+    return {
+      content: '[No LLM configured] Configure a model via the dashboard settings or odin.yaml to enable chat.',
+      toolCalls: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      model: 'none',
+      label: {
+        integrity: 'TRUSTED' as IntegrityLevel,
+        confidentiality: 'PUBLIC' as ConfidentialityLevel,
+        source: 'null-adapter',
+        timestamp: Date.now(),
+      },
+    };
+  }
+}
+
 export function createAdapter(config: LLMConfig): LLMProviderAdapter {
   switch (config.provider) {
     case 'anthropic': return new AnthropicAdapter(config);
     case 'openai': return new OpenAIAdapter(config);
     case 'ollama': return new OllamaAdapter(config);
+    case 'none': return new NullAdapter();
     default: throw new Error(`Unknown LLM provider: ${config.provider}`);
   }
 }

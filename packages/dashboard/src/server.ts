@@ -20,6 +20,9 @@ export interface DashboardState {
   gatewayStatus: 'connected' | 'offline';
   uptime: string;
   llmModel: string;
+  llmProvider: string;
+  llmMaxTokens: number;
+  llmTemperature: number;
 
   // KPIs
   trustScore: number;
@@ -71,7 +74,7 @@ export interface DashboardState {
   alerts: Array<{ id: string; timestamp: string; severity: 'critical' | 'warn' | 'info'; source: string; message: string; acknowledged: boolean }>;
 
   // Activity
-  activities: Array<{ timestamp: string; type: 'tool_call' | 'chat' | 'a2a' | 'security'; action: string; detail: string; tokens?: number; duration?: string }>;
+  activities: Array<{ timestamp: string; type: 'tool_call' | 'chat' | 'a2a' | 'security' | 'cognition'; action: string; detail: string; tokens?: number; duration?: string }>;
 
   // Compliance + Perf
   compliance: { euAiAct: number; owaspAsi: string; singaporeMgf: number; slsa: number };
@@ -273,7 +276,7 @@ export class DashboardServer {
     // ALL zeros/empty — real data is pushed by OdinAgent.syncDashboard()
     return {
       agentName: 'ODIN by AgentLayers', did: 'did:odin:ed25519:initializing...', trustMode: 'SAFE',
-      gatewayStatus: 'offline', uptime: '0s', llmModel: 'initializing...',
+      gatewayStatus: 'offline', uptime: '0s', llmModel: 'initializing...', llmProvider: 'none', llmMaxTokens: 0, llmTemperature: 0,
       trustScore: 0, trustScoreDelta: 0,
       skillsInstalled: 0, skillsTier1Plus: 0, skillsTier0: 0,
       agentsConnected: 0, agentsCertified: 0, agentsMonitoring: 0,
@@ -429,15 +432,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
 .chart-box{height:140px;margin-top:12px}
 
 /* ─── AEGIS Layers ─── */
-.aegis{display:flex;align-items:center;gap:10px;padding:10px;margin-bottom:6px;background:var(--bg);border-radius:6px;border:1px solid var(--border)}
+.aegis{display:flex;flex-direction:column;gap:8px;padding:12px;margin-bottom:6px;background:var(--bg);border-radius:6px;border:1px solid var(--border)}
+.aegis-header{display:flex;align-items:center;gap:8px}
 .aegis-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .dot-actif{background:var(--green)}.dot-alerte{background:var(--orange);animation:pulse 1.5s infinite}.dot-inactif{background:var(--text-dim)}
-.aegis-info{flex:1}.aegis-name{font-size:12px;font-weight:600}.aegis-desc{font-size:10px;color:var(--text-muted)}
-.aegis-metric{font-family:var(--mono);font-size:10px;color:var(--text-muted);flex-shrink:0}
-.aegis-tags{display:flex;gap:3px;flex-shrink:0}
-.aegis-tag{font-size:8px;padding:1px 5px;border-radius:3px;background:var(--blue-bg);color:var(--blue);font-family:var(--mono)}
-.st-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:3px;flex-shrink:0}
+.aegis-info{flex:1;min-width:0}.aegis-name{font-size:13px;font-weight:600;white-space:nowrap}.aegis-desc{font-size:10px;color:var(--text-muted)}
+.st-badge{font-size:9px;font-weight:600;padding:2px 8px;border-radius:3px;flex-shrink:0;text-transform:uppercase;letter-spacing:.3px}
 .st-actif{background:var(--green-bg);color:var(--green)}.st-alerte{background:var(--orange-bg);color:var(--orange)}
+.aegis-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.aegis-metric{font-family:var(--mono);font-size:10px;color:var(--text-muted);flex:1;min-width:0}
+.aegis-tags{display:flex;gap:3px;flex-wrap:wrap;flex-shrink:0}
+.aegis-tag{font-size:8px;padding:1px 5px;border-radius:3px;background:var(--blue-bg);color:var(--blue);font-family:var(--mono)}
 
 /* Circuit Breakers */
 .cb-row{display:flex;gap:6px;align-items:center;margin-top:12px;flex-wrap:wrap}
@@ -543,6 +548,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh
 .chat-empty-title{font-size:16px;font-weight:600;color:var(--text-muted)}
 .chat-empty-sub{font-size:12px;text-align:center;line-height:1.5}
 
+/* ─── Tooltips ─── */
+.tip{position:relative;cursor:help}
+.tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1c2128;color:#c9d1d9;font-size:11px;line-height:1.4;padding:6px 10px;border-radius:6px;border:1px solid var(--border);white-space:normal;width:max-content;max-width:260px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:999;font-weight:400;font-family:var(--sans);text-transform:none;letter-spacing:0}
+.tip:hover::after{opacity:1}
+
 /* ─── Forms ─── */
 .form-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px}
 .form-label{font-size:11px;color:var(--text-muted);width:100px;flex-shrink:0;padding-top:7px}
@@ -571,10 +581,10 @@ select.form-input{cursor:pointer;appearance:auto}
   <div class="sidebar-search"><input type="text" placeholder="Search..."></div>
   <nav class="sidebar-nav">
     <div class="nav-section-title">Navigation</div>
-    <div class="nav-item active" data-section="home"><span class="nav-icon">⌂</span> Home</div>
-    <div class="nav-item" data-section="activity"><span class="nav-icon">◷</span> Activity</div>
-    <div class="nav-item" data-section="system"><span class="nav-icon">⚙</span> System</div>
-    <div class="nav-item" data-section="security"><span class="nav-icon">⛨</span> Security</div>
+    <div class="nav-item active" data-section="home" title="KPIs, health cards, and agent topology overview"><span class="nav-icon">⌂</span> Home</div>
+    <div class="nav-item" data-section="activity" title="Live feed of tool calls, chats, A2A events, and security decisions"><span class="nav-icon">◷</span> Activity</div>
+    <div class="nav-item" data-section="system" title="Configure LLM, skills, MCP servers, gateway, security policies, and terminal"><span class="nav-icon">⚙</span> System</div>
+    <div class="nav-item" data-section="security" title="Trust score dimensions, AEGIS layers, circuit breaker, decision trace, and compliance"><span class="nav-icon">⛨</span> Security</div>
   </nav>
   <div class="sidebar-chats">
     <div class="nav-section-title">Recent Chats</div>
@@ -623,20 +633,22 @@ select.form-input{cursor:pointer;appearance:auto}
       <!-- LLM Config (editable) -->
       <div class="two-col">
         <div class="panel">
-          <div class="panel-title">LLM Router — Configuration</div>
+          <div class="panel-title tip" data-tip="CaMeL Dual-LLM architecture: a Privileged model plans tool calls, a Quarantined model processes untrusted data. This prevents prompt injection by design.">LLM Router — Configuration</div>
           <div class="health-rows" id="sys-llm"></div>
           <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:600">Edit Configuration</div>
-            <div class="form-row"><label class="form-label">Model</label><input class="form-input" id="cfg-model" placeholder="gemma4"></div>
-            <div class="form-row"><label class="form-label">Temperature</label><input class="form-input" id="cfg-temp" type="number" step="0.1" min="0" max="2" placeholder="0.7"></div>
-            <div class="form-row"><label class="form-label">Max Tokens</label><input class="form-input" id="cfg-tokens" type="number" placeholder="4096"></div>
-            <div class="form-row"><label class="form-label">Base URL</label><input class="form-input" id="cfg-url" placeholder="http://localhost:11434"></div>
+            <div class="form-row"><label class="form-label tip" data-tip="LLM backend: Ollama (local, private), Anthropic (Claude API), OpenAI, or None to run without LLM">Provider</label><select class="form-input" id="cfg-provider"><option value="">— keep current —</option><option value="ollama">Ollama (local)</option><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="none">None</option></select></div>
+            <div class="form-row"><label class="form-label tip" data-tip="Model name used by both Privileged and Quarantined LLMs. Ex: gemma3, claude-sonnet-4-20250514, gpt-4o">Model</label><input class="form-input" id="cfg-model" placeholder="gemma3"></div>
+            <div class="form-row"><label class="form-label tip" data-tip="Required for Anthropic or OpenAI. Not needed for Ollama (local). Stored in memory only, never persisted.">API Key</label><input class="form-input" id="cfg-apikey" type="password" placeholder="sk-... (for Anthropic/OpenAI)"></div>
+            <div class="form-row"><label class="form-label tip" data-tip="Controls randomness: 0 = deterministic, 1 = creative, 2 = very random. Default 0.7 is a balanced setting.">Temperature</label><input class="form-input" id="cfg-temp" type="number" step="0.1" min="0" max="2" placeholder="0.7"></div>
+            <div class="form-row"><label class="form-label tip" data-tip="Maximum tokens the LLM can generate per response. Higher = longer responses but slower and more costly.">Max Tokens</label><input class="form-input" id="cfg-tokens" type="number" placeholder="4096"></div>
+            <div class="form-row"><label class="form-label tip" data-tip="API endpoint URL. For Ollama: http://localhost:11434. For OpenAI-compatible APIs, set the base URL here.">Base URL</label><input class="form-input" id="cfg-url" placeholder="http://localhost:11434"></div>
             <button class="btn-action" onclick="updateConfig()">Apply Changes</button>
             <span class="form-status" id="cfg-status"></span>
           </div>
         </div>
         <div class="panel">
-          <div class="panel-title">Channels</div>
+          <div class="panel-title tip" data-tip="Active messaging channels. CLI is always available. Configure Telegram, Discord, or Slack in Gateway settings.">Channels</div>
           <div id="sys-channels"><div class="empty">CLI active · Telegram/Discord available</div></div>
         </div>
       </div>
@@ -644,17 +656,17 @@ select.form-input{cursor:pointer;appearance:auto}
       <!-- Skills (table + install form) -->
       <div class="two-col">
         <div class="panel">
-          <div class="panel-title">Skills installés — Trust Tiers</div>
-          <table class="tbl"><thead><tr><th>Skill</th><th>Tier</th><th>Ring</th><th>Score</th></tr></thead><tbody id="sys-skills"></tbody></table>
+          <div class="panel-title tip" data-tip="Tools available to the agent. Each skill has a Trust Tier (T0-T2) and runs in a Sandbox Ring (0-2) with isolation constraints.">Skills installés — Trust Tiers</div>
+          <table class="tbl"><thead><tr><th class="tip" data-tip="Tool name as registered in the agent">Skill</th><th class="tip" data-tip="Trust tier: T0=untrusted, T1=verified, T2=built-in trusted">Tier</th><th class="tip" data-tip="Sandbox ring: 0=read-only (5s), 1=read/write (30s), 2=full access (60s, needs approval)">Ring</th><th class="tip" data-tip="AgentLayers safety score (null = not scanned)">Score</th></tr></thead><tbody id="sys-skills"></tbody></table>
         </div>
         <div class="panel">
-          <div class="panel-title">Installer un Skill</div>
-          <div class="form-row"><label class="form-label">Nom</label><input class="form-input" id="skill-name" placeholder="ex: weather_lookup"></div>
-          <div class="form-row"><label class="form-label">Description</label><input class="form-input" id="skill-desc" placeholder="ex: Get weather for a city"></div>
-          <div class="form-row"><label class="form-label">Paramètres (JSON)</label><textarea class="form-textarea" id="skill-params" rows="3" placeholder='{"city":{"type":"string","description":"City name"}}'></textarea></div>
-          <div class="form-row"><label class="form-label">Code du handler</label><textarea class="form-textarea" id="skill-code" rows="5" placeholder="const res = await fetch(...);\nreturn res.text();"></textarea></div>
-          <div class="form-row"><label class="form-label">Permissions</label><input class="form-input" id="skill-perms" placeholder="network.read, file.read (comma-separated)"></div>
-          <div class="form-row"><label class="form-label">Ring</label>
+          <div class="panel-title tip" data-tip="Add a custom tool. It will be scanned by the security pipeline and assigned a trust tier based on its permissions.">Installer un Skill</div>
+          <div class="form-row"><label class="form-label tip" data-tip="Unique identifier for this tool. Used in LLM tool calls.">Nom</label><input class="form-input" id="skill-name" placeholder="ex: weather_lookup"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Human-readable description shown to the LLM so it knows when to use this tool.">Description</label><input class="form-input" id="skill-desc" placeholder="ex: Get weather for a city"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="JSON Schema defining the tool parameters. The LLM generates arguments matching this schema.">Paramètres (JSON)</label><textarea class="form-textarea" id="skill-params" rows="3" placeholder='{"city":{"type":"string","description":"City name"}}'></textarea></div>
+          <div class="form-row"><label class="form-label tip" data-tip="JavaScript code executed when the tool is called. Has access to the arguments object. Must return a string.">Code du handler</label><textarea class="form-textarea" id="skill-code" rows="5" placeholder="const res = await fetch(...);\nreturn res.text();"></textarea></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Capabilities this tool requires. Affects which sandbox ring it can run in.">Permissions</label><input class="form-input" id="skill-perms" placeholder="network.read, file.read (comma-separated)"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Ring 0: read-only, no network, 5s timeout. Ring 1: read/write, controlled network, 30s. Ring 2: full access, requires human approval, 60s.">Ring</label>
             <select class="form-input" id="skill-ring"><option value="0">Ring 0 — Lecture seule</option><option value="1" selected>Ring 1 — Lecture/écriture</option><option value="2">Ring 2 — Accès complet (approval)</option></select>
           </div>
           <button class="btn-action" onclick="installSkill()">Installer le Skill</button>
@@ -665,13 +677,13 @@ select.form-input{cursor:pointer;appearance:auto}
       <!-- MCP Servers (table + connect form) -->
       <div class="two-col">
         <div class="panel">
-          <div class="panel-title">MCP Servers connectés</div>
+          <div class="panel-title tip" data-tip="Model Context Protocol servers extend the agent with external tools and data sources. Each server is scanned and assigned a safety score.">MCP Servers connectés</div>
           <div id="sys-mcp"></div>
         </div>
         <div class="panel">
-          <div class="panel-title">Connecter un serveur MCP</div>
-          <div class="form-row"><label class="form-label">Nom</label><input class="form-input" id="mcp-name" placeholder="ex: github-mcp"></div>
-          <div class="form-row"><label class="form-label">URL</label><input class="form-input" id="mcp-url" placeholder="https://mcp.example.com/sse"></div>
+          <div class="panel-title tip" data-tip="Connect to an MCP server to add its tools to the agent. The server will be scanned by AgentLayers for safety.">Connecter un serveur MCP</div>
+          <div class="form-row"><label class="form-label tip" data-tip="Display name for this MCP server in the dashboard.">Nom</label><input class="form-input" id="mcp-name" placeholder="ex: github-mcp"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="SSE or WebSocket endpoint URL of the MCP server.">URL</label><input class="form-input" id="mcp-url" placeholder="https://mcp.example.com/sse"></div>
           <button class="btn-action" onclick="connectMCP()">Connecter</button>
           <span class="form-status" id="mcp-status"></span>
         </div>
@@ -680,7 +692,7 @@ select.form-input{cursor:pointer;appearance:auto}
       <!-- Agent Personality -->
       <div class="two-col">
         <div class="panel">
-          <div class="panel-title">Agent Personality — SOUL.md</div>
+          <div class="panel-title tip" data-tip="Custom system prompt injected into every LLM call. Defines the agent's tone, behavior, and constraints.">Agent Personality — SOUL.md</div>
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Define who Odin is. This text is injected into every system prompt.</div>
           <textarea class="form-textarea" id="cfg-personality" rows="6" placeholder="You are a helpful, security-focused AI agent. You speak concisely and always verify before acting."></textarea>
           <div style="display:flex;gap:8px;margin-top:8px">
@@ -689,9 +701,9 @@ select.form-input{cursor:pointer;appearance:auto}
           </div>
         </div>
         <div class="panel">
-          <div class="panel-title">Memory — Configuration</div>
-          <div class="form-row"><label class="form-label">Max Entries</label><input class="form-input" id="mem-max" type="number" placeholder="10000"></div>
-          <div class="form-row"><label class="form-label">DB Path</label><input class="form-input" id="mem-path" placeholder="./odin-memory.db"></div>
+          <div class="panel-title tip" data-tip="Merkle-verified memory store backed by SQLite. Every entry is signed with Ed25519 for tamper detection.">Memory — Configuration</div>
+          <div class="form-row"><label class="form-label tip" data-tip="Maximum number of memory entries before oldest are pruned. Higher = more context but larger DB.">Max Entries</label><input class="form-input" id="mem-max" type="number" placeholder="10000"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Path to the SQLite database file. Relative to the project root.">DB Path</label><input class="form-input" id="mem-path" placeholder="./odin-memory.db"></div>
           <button class="btn-action" onclick="saveSetting('memory',{maxEntries:parseInt(document.getElementById('mem-max').value)||undefined,dbPath:document.getElementById('mem-path').value||undefined})">Save Memory Config</button>
           <span class="form-status" id="memory-status"></span>
         </div>
@@ -700,28 +712,28 @@ select.form-input{cursor:pointer;appearance:auto}
       <!-- Gateway + Security -->
       <div class="two-col">
         <div class="panel">
-          <div class="panel-title">Gateway — Messaging Channels</div>
-          <div class="form-row"><label class="form-label">Type</label>
+          <div class="panel-title tip" data-tip="Connect the agent to messaging platforms. Each gateway routes messages through the full security pipeline.">Gateway — Messaging Channels</div>
+          <div class="form-row"><label class="form-label tip" data-tip="Primary input channel. CLI = terminal, Telegram/Discord/Slack = bot integration.">Type</label>
             <select class="form-input" id="gw-type"><option value="cli">CLI</option><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="slack">Slack</option><option value="whatsapp">WhatsApp</option></select>
           </div>
-          <div class="form-row"><label class="form-label">Telegram Token</label><input class="form-input" id="gw-telegram" type="password" placeholder="Bot token from @BotFather"></div>
-          <div class="form-row"><label class="form-label">Discord Token</label><input class="form-input" id="gw-discord" type="password" placeholder="Discord bot token"></div>
-          <div class="form-row"><label class="form-label">Slack Token</label><input class="form-input" id="gw-slack" type="password" placeholder="Slack bot token"></div>
-          <div class="form-row"><label class="form-label">Allowed Users</label><input class="form-input" id="gw-users" placeholder="user1, user2 (comma-separated, empty=all)"></div>
-          <div class="form-row"><label class="form-label">Require @mention</label><select class="form-input" id="gw-mention"><option value="false">No</option><option value="true">Yes (groups only)</option></select></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Bot token from Telegram @BotFather. Required for Telegram gateway.">Telegram Token</label><input class="form-input" id="gw-telegram" type="password" placeholder="Bot token from @BotFather"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Bot token from the Discord Developer Portal. Required for Discord gateway.">Discord Token</label><input class="form-input" id="gw-discord" type="password" placeholder="Discord bot token"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Bot OAuth token from Slack App settings. Required for Slack gateway.">Slack Token</label><input class="form-input" id="gw-slack" type="password" placeholder="Slack bot token"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Whitelist of user IDs allowed to interact. Empty = everyone can use the bot.">Allowed Users</label><input class="form-input" id="gw-users" placeholder="user1, user2 (comma-separated, empty=all)"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="If enabled, the bot only responds when @mentioned in group chats. DMs always work.">Require @mention</label><select class="form-input" id="gw-mention"><option value="false">No</option><option value="true">Yes (groups only)</option></select></div>
           <button class="btn-action" onclick="saveGateway()">Save Gateway Config</button>
           <span class="form-status" id="gateway-status"></span>
         </div>
         <div class="panel">
-          <div class="panel-title">Security — Policies</div>
-          <div class="form-row"><label class="form-label">Approval Mode</label>
+          <div class="panel-title tip" data-tip="Cedar-inspired policy engine. Evaluates every tool call against trust score, rate limits, ring constraints, and approval rules.">Security — Policies</div>
+          <div class="form-row"><label class="form-label tip" data-tip="Manual: user confirms every sensitive action. Smart: LLM evaluates risk. Off: auto-approve (not recommended).">Approval Mode</label>
             <select class="form-input" id="sec-approval"><option value="manual">Manual — always ask</option><option value="smart">Smart — LLM decides</option><option value="off">Off — auto-approve all</option></select>
           </div>
-          <div class="form-row"><label class="form-label">Redact Secrets</label><select class="form-input" id="sec-redact"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
-          <div class="form-row"><label class="form-label">Max Daily Calls</label><input class="form-input" id="sec-maxcalls" type="number" placeholder="1000"></div>
-          <div class="form-row"><label class="form-label">Session TTL (sec)</label><input class="form-input" id="sec-ttl" type="number" placeholder="3600"></div>
-          <div class="form-row"><label class="form-label">Blocked Domains</label><input class="form-input" id="sec-blocklist" placeholder="evil.com, malware.net (comma-separated)"></div>
-          <div class="form-row"><label class="form-label">Require Approval</label><input class="form-input" id="sec-tools" placeholder="shell_exec, code_exec (comma-separated)"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Automatically redact API keys, passwords, and secrets from tool outputs and logs.">Redact Secrets</label><select class="form-input" id="sec-redact"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Rate limit: maximum tool calls per 24h. Exceeding this triggers a Cedar policy BLOCK.">Max Daily Calls</label><input class="form-input" id="sec-maxcalls" type="number" placeholder="1000"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Session time-to-live. After this duration, the session is reset and conversation history is cleared.">Session TTL (sec)</label><input class="form-input" id="sec-ttl" type="number" placeholder="3600"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Domains the agent is forbidden from accessing via network tools. Requests to these domains are blocked by IFC.">Blocked Domains</label><input class="form-input" id="sec-blocklist" placeholder="evil.com, malware.net (comma-separated)"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Tools that always require explicit human approval before execution, regardless of trust score.">Require Approval</label><input class="form-input" id="sec-tools" placeholder="shell_exec, code_exec (comma-separated)"></div>
           <button class="btn-action" onclick="saveSecurity()">Save Security Config</button>
           <span class="form-status" id="security-status"></span>
         </div>
@@ -730,25 +742,25 @@ select.form-input{cursor:pointer;appearance:auto}
       <!-- Terminal + Cron -->
       <div class="two-col">
         <div class="panel">
-          <div class="panel-title">Terminal — Execution Backend</div>
-          <div class="form-row"><label class="form-label">Backend</label>
+          <div class="panel-title tip" data-tip="Where shell_exec and code_exec tools run. Local = host machine. Docker = isolated container. SSH = remote server.">Terminal — Execution Backend</div>
+          <div class="form-row"><label class="form-label tip" data-tip="Local: runs on host (fast, no isolation). Docker: sandboxed container (safe). SSH: remote execution.">Backend</label>
             <select class="form-input" id="term-backend"><option value="local">Local</option><option value="docker">Docker</option><option value="ssh">SSH</option></select>
           </div>
-          <div class="form-row"><label class="form-label">Timeout (sec)</label><input class="form-input" id="term-timeout" type="number" placeholder="180"></div>
-          <div class="form-row"><label class="form-label">Docker Image</label><input class="form-input" id="term-docker" placeholder="nikolaik/python-nodejs:python3.11-nodejs20"></div>
-          <div class="form-row"><label class="form-label">SSH Host</label><input class="form-input" id="term-ssh-host" placeholder="user@host"></div>
-          <div class="form-row"><label class="form-label">SSH Port</label><input class="form-input" id="term-ssh-port" type="number" placeholder="22"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Maximum execution time for a single command. Killed after timeout to prevent runaway processes.">Timeout (sec)</label><input class="form-input" id="term-timeout" type="number" placeholder="180"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="Docker image used for sandboxed execution. Must have the tools the agent needs (Node, Python, etc.).">Docker Image</label><input class="form-input" id="term-docker" placeholder="nikolaik/python-nodejs:python3.11-nodejs20"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="SSH connection string for remote execution. Format: user@hostname">SSH Host</label><input class="form-input" id="term-ssh-host" placeholder="user@host"></div>
+          <div class="form-row"><label class="form-label tip" data-tip="SSH port number. Default is 22.">SSH Port</label><input class="form-input" id="term-ssh-port" type="number" placeholder="22"></div>
           <button class="btn-action" onclick="saveTerminal()">Save Terminal Config</button>
           <span class="form-status" id="terminal-status"></span>
         </div>
         <div class="panel">
-          <div class="panel-title">Cron — Scheduled Tasks</div>
+          <div class="panel-title tip" data-tip="Schedule recurring tasks. The agent will execute the prompt at the specified interval or cron expression.">Cron — Scheduled Tasks</div>
           <div id="cron-list" style="margin-bottom:12px"><div class="empty">No scheduled tasks</div></div>
           <div style="border-top:1px solid var(--border);padding-top:10px">
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:600">Add Scheduled Task</div>
-            <div class="form-row"><label class="form-label">Name</label><input class="form-input" id="cron-name" placeholder="daily-report"></div>
-            <div class="form-row"><label class="form-label">Schedule</label><input class="form-input" id="cron-schedule" placeholder="0 9 * * * (cron) or 30m (interval)"></div>
-            <div class="form-row"><label class="form-label">Prompt</label><textarea class="form-textarea" id="cron-prompt" rows="2" placeholder="What should Odin do? e.g. Check my emails and summarize them"></textarea></div>
+            <div class="form-row"><label class="form-label tip" data-tip="Unique name for this scheduled task. Used to identify and manage it.">Name</label><input class="form-input" id="cron-name" placeholder="daily-report"></div>
+            <div class="form-row"><label class="form-label tip" data-tip="Cron expression (e.g. '0 9 * * *' = daily at 9am) or interval shorthand (e.g. '30m' = every 30 minutes).">Schedule</label><input class="form-input" id="cron-schedule" placeholder="0 9 * * * (cron) or 30m (interval)"></div>
+            <div class="form-row"><label class="form-label tip" data-tip="The instruction sent to the agent when the task fires. Treated as a user message through the full security pipeline.">Prompt</label><textarea class="form-textarea" id="cron-prompt" rows="2" placeholder="What should Odin do? e.g. Check my emails and summarize them"></textarea></div>
             <button class="btn-action" onclick="addCronJob()">Add Task</button>
             <span class="form-status" id="cron-status"></span>
           </div>
@@ -760,7 +772,7 @@ select.form-input{cursor:pointer;appearance:auto}
     <div class="section" id="sec-security">
       <div class="two-col">
         <div class="panel">
-          <div class="panel-title">Trust Score AgentLayers — 6 Dimensions</div>
+          <div class="panel-title tip" data-tip="Weighted trust score: Performance 30%, Security 25%, Transparency 15%, Compliance 15%, Reputation 10%, Reliability 5%. Decays over time (7-day half-life).">Trust Score AgentLayers — 6 Dimensions</div>
           <div class="donut-wrapper">
             <div class="donut-container"><canvas id="donut-chart"></canvas>
               <div class="donut-center"><div class="donut-score" id="d-score">82</div><div class="donut-label">/ 100</div></div>
@@ -775,26 +787,26 @@ select.form-input{cursor:pointer;appearance:auto}
           <div class="chart-box"><canvas id="hist-chart"></canvas></div>
         </div>
         <div class="panel">
-          <div class="panel-title">Couches AEGIS</div>
+          <div class="panel-title tip" data-tip="4 security layers protecting every tool call: IFC taint tracking, Supply Chain integrity (Merkle+Ed25519), Cedar Policy Engine, and Trust Mesh (IATP).">Couches AEGIS</div>
           <div id="aegis-list"></div>
           <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Circuit Breaker — 5 états</div>
+            <div class="tip" data-tip="5-state circuit breaker: CLOSED (normal) → DEGRADED (partial failures) → OPEN (blocked) → HALF_OPEN (testing recovery). Innovation: semantic failure detection counts hallucinated 200 OK as double failure." style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Circuit Breaker — 5 états</div>
             <div class="cb-row" id="cb-row"></div>
           </div>
         </div>
       </div>
       <div class="two-col">
         <div class="panel">
-          <div class="panel-title">Decision Trace — Journal signé DID</div>
+          <div class="panel-title tip" data-tip="Cryptographically signed log of every security decision (ALLOW/WARN/BLOCK). Each entry is signed with the agent's Ed25519 key for tamper-proof auditing.">Decision Trace — Journal signé DID</div>
           <div class="trace-list" id="trace-list"></div>
         </div>
         <div>
           <div class="panel">
-            <div class="panel-title">Conformité réglementaire</div>
+            <div class="panel-title tip" data-tip="Compliance scores against 4 frameworks: EU AI Act (transparency, human oversight), OWASP ASI (top 10 AI risks), Singapore MGF (governance), SLSA (supply chain).">Conformité réglementaire</div>
             <div id="comp-bars"></div>
           </div>
           <div class="panel">
-            <div class="panel-title">Performance</div>
+            <div class="panel-title tip" data-tip="Real-time performance metrics computed from actual measurements. Cedar latency, task completion rate, token overhead, and Merkle verification time.">Performance</div>
             <div class="perf-grid" id="perf-grid"></div>
           </div>
         </div>
@@ -883,14 +895,18 @@ async function connectMCP() {
 
 // ─── Config Update ───
 async function updateConfig() {
+  const provider = document.getElementById('cfg-provider').value;
   const model = document.getElementById('cfg-model').value.trim();
+  const apiKey = document.getElementById('cfg-apikey').value.trim();
   const temp = document.getElementById('cfg-temp').value;
   const tokens = document.getElementById('cfg-tokens').value;
   const baseUrl = document.getElementById('cfg-url').value.trim();
   const status = document.getElementById('cfg-status');
 
   const config = {};
+  if (provider) config.provider = provider;
   if (model) config.model = model;
+  if (apiKey) config.apiKey = apiKey;
   if (temp) config.temperature = parseFloat(temp);
   if (tokens) config.maxTokens = parseInt(tokens);
   if (baseUrl) config.baseUrl = baseUrl;
@@ -903,7 +919,8 @@ async function updateConfig() {
       body: JSON.stringify(config) });
     const data = await res.json();
     status.textContent = data.message; status.className = data.success ? 'form-status form-ok' : 'form-status form-err';
-    if (data.success) { document.getElementById('cfg-model').value = ''; document.getElementById('cfg-temp').value = '';
+    if (data.success) { document.getElementById('cfg-provider').value = ''; document.getElementById('cfg-model').value = '';
+      document.getElementById('cfg-apikey').value = ''; document.getElementById('cfg-temp').value = '';
       document.getElementById('cfg-tokens').value = ''; document.getElementById('cfg-url').value = ''; }
   } catch (err) { status.textContent = 'Connection error'; status.className = 'form-status form-err'; }
 }
@@ -1001,23 +1018,24 @@ function render(){
 
   // KPIs
   const kpis=[
-    {l:'Trust Score',v:S.trustScore,s:(S.trustScoreDelta>=0?'+':'')+S.trustScoreDelta+' vs hier',c:S.trustScoreDelta>=0?'kpi-up':'kpi-down'},
-    {l:'Sessions',v:S.activeSessions,s:S.tokensToday+' tokens today'},
-    {l:'Channels',v:S.channels+'/1',s:'CLI active'},
-    {l:'Agents',v:S.agentsConnected,s:S.agentsCertified+' certified'},
-    {l:'Alerts',v:S.alertsActive,s:S.alertsCritical+' critical · '+S.alertsWarning+' warn',c:S.alertsActive>0?'kpi-down':''},
+    {l:'Trust Score',v:S.trustScore,s:(S.trustScoreDelta>=0?'+':'')+S.trustScoreDelta+' vs hier',c:S.trustScoreDelta>=0?'kpi-up':'kpi-down',t:'Composite score (0-100) from 6 dimensions. Decays over time. Below 40 = DEGRADED mode.'},
+    {l:'Sessions',v:S.activeSessions,s:S.tokensToday+' tokens today',t:'Active chat sessions and total LLM tokens consumed today.'},
+    {l:'Channels',v:S.channels+'/1',s:'CLI active',t:'Connected messaging channels (CLI, Telegram, Discord, Slack).'},
+    {l:'Agents',v:S.agentsConnected,s:S.agentsCertified+' certified',t:'Peer agents connected via A2A protocol. Certified = verified by AgentLayers.'},
+    {l:'Alerts',v:S.alertsActive,s:S.alertsCritical+' critical · '+S.alertsWarning+' warn',c:S.alertsActive>0?'kpi-down':'',t:'Active security alerts from IFC violations, Cedar blocks, and trust warnings.'},
   ];
-  document.getElementById('kpi-row').innerHTML=kpis.map(k=>'<div class="kpi"><div class="kpi-label">'+escHtml(k.l)+'</div><div class="kpi-val"'+(k.c?' style="color:'+scCol(k.v)+'"':'')+'>'+escHtml(String(k.v))+'</div><div class="kpi-sub'+(k.c?' '+k.c:'')+'">'+escHtml(k.s)+'</div></div>').join('');
+  document.getElementById('kpi-row').innerHTML=kpis.map(k=>'<div class="kpi tip" data-tip="'+escHtml(k.t)+'"><div class="kpi-label">'+escHtml(k.l)+'</div><div class="kpi-val"'+(k.c?' style="color:'+scCol(k.v)+'"':'')+'>'+escHtml(String(k.v))+'</div><div class="kpi-sub'+(k.c?' '+k.c:'')+'">'+escHtml(k.s)+'</div></div>').join('');
 
   // Health cards
   const hc=[
-    {name:'Gateway',live:'green',rows:[['Status',S.gatewayStatus],['DID',S.did.slice(0,24)+'...'],['IFC Engine','ACTIVE'],['Cedar PEP','< 0.1ms']],link:'system'},
-    {name:'Agents',live:S.agentsConnected>0?'green':'green',rows:[['Active',S.agentsConnected],['Certified',S.agentsCertified],['Quarantined',S.peerAgents.filter(a=>a.status==='quarantined').length],['Avg Trust',S.peerAgents.length?Math.round(S.peerAgents.reduce((a,b)=>a+b.trustScore,0)/S.peerAgents.length):'N/A']],link:'security'},
-    {name:'Sessions',live:'green',rows:[['Active',S.activeSessions],['Model',S.llmModel],['Tokens today',S.tokensToday],['Uptime',S.uptime]],link:'activity'},
-    {name:'Skills',live:'green',rows:[['Installed',S.skillsInstalled],['Tier 1+',S.skillsTier1Plus],['Tier 0',S.skillsTier0],['Built-in',S.skills.filter(s=>s.status==='built-in').length]],link:'system'},
-    {name:'Alert Pressure',live:S.alertsActive>0?'orange':'green',rows:[['Active',S.alertsActive],['Cedar violations',S.alertsCritical],['Trust warnings',S.alertsWarning],['IFC blocks',S.decisionTrace.filter(d=>d.type==='block'&&d.emitter==='IFC Engine').length]],link:'security'},
+    {name:'Gateway',live:'green',rows:[['Status',S.gatewayStatus],['DID',S.did.slice(0,24)+'...'],['IFC Engine','ACTIVE'],['Cedar PEP','< 0.1ms']],link:'system',t:'Input gateway status. Shows DID identity, IFC taint engine, and Cedar policy enforcement point latency.'},
+    {name:'Agents',live:S.agentsConnected>0?'green':'green',rows:[['Active',S.agentsConnected],['Certified',S.agentsCertified],['Quarantined',S.peerAgents.filter(a=>a.status==='quarantined').length],['Avg Trust',S.peerAgents.length?Math.round(S.peerAgents.reduce((a,b)=>a+b.trustScore,0)/S.peerAgents.length):'N/A']],link:'security',t:'A2A peer agents. Connected via signed messages. Circuit breaker isolates unreliable peers.'},
+    {name:'Sessions',live:'green',rows:[['Active',S.activeSessions],['Model',S.llmModel],['Tokens today',S.tokensToday],['Uptime',S.uptime]],link:'activity',t:'Current LLM session info. Token usage, model, and agent uptime since last restart.'},
+    {name:'Skills',live:'green',rows:[['Installed',S.skillsInstalled],['Tier 1+',S.skillsTier1Plus],['Tier 0',S.skillsTier0],['Built-in',S.skills.filter(s=>s.status==='built-in').length]],link:'system',t:'Installed tools/skills by trust tier. T0=unscanned, T1+=verified by AgentLayers, Built-in=core tools.'},
+    {name:'Alert Pressure',live:S.alertsActive>0?'orange':'green',rows:[['Active',S.alertsActive],['Cedar violations',S.alertsCritical],['Trust warnings',S.alertsWarning],['IFC blocks',S.decisionTrace.filter(d=>d.type==='block'&&d.emitter==='IFC Engine').length]],link:'security',t:'Security pressure gauge. High alert count degrades trust score and may trigger DEGRADED mode.'},
   ];
   document.getElementById('health-grid').innerHTML=hc.map(c=>'<div class="health-card" onclick="navTo(\\''+c.link+'\\')"><div class="health-top"><div class="health-name">'+escHtml(c.name)+'</div><span class="live-badge live-'+c.live+'">LIVE</span></div><div class="health-rows">'+c.rows.map(r=>'<div class="health-row"><span class="health-row-label">'+escHtml(String(r[0]))+'</span><span class="health-row-val">'+escHtml(String(r[1]))+'</span></div>').join('')+'</div><span class="health-open">Open →</span></div>').join('');
+  document.querySelectorAll('.health-card').forEach((el,i)=>{el.setAttribute('title',hc[i].t);});
 
   // Topology
   document.getElementById('topo-graph').innerHTML=
@@ -1032,7 +1050,7 @@ function render(){
   renderActivity();
 
   // System
-  document.getElementById('sys-llm').innerHTML=[['Model',S.llmModel],['Provider','Ollama (local)'],['Pattern','Dual-LLM (CaMeL)'],['Max Tokens','4096'],['Temperature','0.7']].map(r=>'<div class="health-row"><span class="health-row-label">'+escHtml(r[0])+'</span><span class="health-row-val">'+escHtml(r[1])+'</span></div>').join('');
+  document.getElementById('sys-llm').innerHTML=[['Model',S.llmModel],['Provider',S.llmProvider==='none'?'Not configured':S.llmProvider],['Pattern','Dual-LLM (CaMeL)'],['Max Tokens',String(S.llmMaxTokens)],['Temperature',String(S.llmTemperature)]].map(r=>'<div class="health-row"><span class="health-row-label">'+escHtml(r[0])+'</span><span class="health-row-val">'+escHtml(r[1])+'</span></div>').join('');
   document.getElementById('sys-skills').innerHTML=S.skills.map(s=>'<tr><td style="font-family:var(--mono)">'+escHtml(s.name)+' <span style="color:var(--text-dim)">'+escHtml(s.version)+'</span></td><td><span class="tier t'+s.tier+'">T'+s.tier+'</span></td><td style="font-family:var(--mono);color:var(--text-muted)">R'+s.ring+'</td><td style="font-family:var(--mono)">'+(s.score!=null?escHtml(String(s.score)):'—')+'</td></tr>').join('');
   document.getElementById('sys-mcp').innerHTML=S.mcpServers.length?'<table class="tbl"><thead><tr><th>Server</th><th>Status</th><th>Score</th></tr></thead><tbody>'+S.mcpServers.map(m=>'<tr><td style="font-family:var(--mono)">'+escHtml(m.name)+'</td><td><span class="mcp-st" style="background:var(--'+{SAFE:'green',CAUTION:'orange',DANGEROUS:'red'}[m.status]+'-bg);color:var(--'+{SAFE:'green',CAUTION:'orange',DANGEROUS:'red'}[m.status]+')">'+escHtml(m.status)+'</span></td><td style="font-family:var(--mono)">'+escHtml(String(m.score))+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">No MCP servers connected</div>';
 
@@ -1052,7 +1070,7 @@ function render(){
   histC.data.datasets[0].data=S.trustHistory.map(h=>h.score);histC.update();
 
   // AEGIS
-  document.getElementById('aegis-list').innerHTML=S.aegisLayers.map(l=>{const st=l.status.toLowerCase();return '<div class="aegis"><div class="aegis-dot dot-'+st+'"></div><div class="aegis-info"><div class="aegis-name">'+escHtml(l.name)+'</div><div class="aegis-desc">'+escHtml(l.description)+'</div></div><div class="aegis-metric">'+escHtml(l.metric)+'</div><div class="aegis-tags">'+l.owaspRisks.map(r=>'<span class="aegis-tag">'+escHtml(r)+'</span>').join('')+'</div><div class="st-badge st-'+st+'">'+escHtml(l.status)+'</div></div>';}).join('');
+  document.getElementById('aegis-list').innerHTML=S.aegisLayers.map(l=>{const st=l.status.toLowerCase();return '<div class="aegis"><div class="aegis-header"><div class="aegis-dot dot-'+st+'"></div><div class="aegis-info"><div class="aegis-name">'+escHtml(l.name)+'</div><div class="aegis-desc">'+escHtml(l.description)+'</div></div><div class="st-badge st-'+st+'">'+escHtml(l.status)+'</div></div><div class="aegis-footer"><div class="aegis-metric">'+escHtml(l.metric)+'</div><div class="aegis-tags">'+l.owaspRisks.map(r=>'<span class="aegis-tag">'+escHtml(r)+'</span>').join('')+'</div></div></div>';}).join('');
 
   // CB
   const cbs=['CLOSED','DEGRADED','OPEN','HALF_OPEN'];

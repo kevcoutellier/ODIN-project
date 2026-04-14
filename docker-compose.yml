@@ -1,0 +1,40 @@
+# ── Odin by AgentLayers — Docker Compose ────────────────────────────
+# Usage:
+#   docker compose up -d          # Start Odin
+#   docker compose up -d --build  # Rebuild and start
+#   docker compose logs -f odin   # Follow logs
+# ────────────────────────────────────────────────────────────────────
+
+services:
+  odin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: odin-agent
+    restart: unless-stopped
+    ports:
+      - "${ODIN_DASHBOARD_PORT:-3000}:3000"
+    volumes:
+      # Persist SQLite databases across restarts
+      - odin-data:/app/data
+      # Mount config file (override at runtime)
+      - ./odin.yaml:/app/odin.yaml:ro
+    environment:
+      - NODE_ENV=production
+      - ODIN_DATA_DIR=/app/data
+      - ODIN_DASHBOARD_PORT=3000
+      # LLM provider keys (pass via .env file or docker compose --env-file)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  odin-data:
+    driver: local

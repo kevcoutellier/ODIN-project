@@ -5,6 +5,9 @@ dist/
 .env.local
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 coverage/
 .turbo/
 *.log
+.docx

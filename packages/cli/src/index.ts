@@ -73,20 +73,24 @@ async function main() {
     await agent.init();
   } catch (error: any) {
     console.error(colorize(`\nFailed to initialize: ${error.message}`, 'red'));
-    console.error(colorize('Make sure Ollama is running (ollama serve) with Gemma 4 (ollama pull gemma4)', 'yellow'));
     process.exit(1);
   }
 
   const did = agent.getDID();
   const trustMode = agent.getTrustMode();
   const dashboardPort = config.observability.dashboardPort;
+  const llmConfigured = agent.isLLMConfigured();
 
   console.log(colorize(`\n  DID: ${did.id}`, 'dim'));
   console.log(colorize(`  Trust Mode: ${trustMode}`, trustMode === 'SAFE' ? 'green' : 'yellow'));
   console.log(colorize(`  Session: ${agent.getSessionId()}`, 'dim'));
-  console.log(colorize(`  LLM: Gemma 4 via Ollama (local, private)`, 'dim'));
+  console.log(colorize(`  LLM: ${agent.getLLMStatus()}`, llmConfigured ? 'dim' : 'yellow'));
   console.log(colorize(`  AgentLayers: ${agent.getTrustScore()?.certifiedBy?.includes('agent-layers') ? 'Connected' : 'Local only (free tier)'}`, 'dim'));
   console.log(colorize(`\n  Dashboard: http://localhost:${dashboardPort}`, 'cyan'));
+  if (!llmConfigured) {
+    console.log(colorize(`\n  No LLM configured. The dashboard is running — configure a model to start chatting.`, 'yellow'));
+    console.log(colorize(`  Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure Ollama in odin.yaml`, 'yellow'));
+  }
   console.log();
 
   // Handle --status flag
@@ -104,7 +108,7 @@ async function main() {
     prompt: colorize('you > ', 'cyan'),
   });
 
-  console.log(colorize('Type your message. Commands: /status, /memory <query>, /quit\n', 'dim'));
+  console.log(colorize('Type your message. Commands: /status, /memory <query>, /llm <provider> <model>, /quit\n', 'dim'));
   rl.prompt();
 
   rl.on('line', async (line) => {
@@ -130,6 +134,24 @@ async function main() {
       console.log(`  Total Decisions: ${report.totalDecisions}`);
       console.log(`  Denied: ${report.deniedDecisions}`);
       console.log(colorize('--- End Status ---\n', 'bright'));
+      rl.prompt();
+      return;
+    }
+
+    if (input.startsWith('/llm ')) {
+      const parts = input.slice(5).trim().split(/\s+/);
+      const provider = parts[0];
+      const model = parts[1];
+      if (!provider) {
+        console.log(colorize(`  Current LLM: ${agent.getLLMStatus()}`, 'dim'));
+        console.log(colorize('  Usage: /llm <provider> <model> [baseUrl]', 'dim'));
+        console.log(colorize('  Providers: anthropic, openai, ollama, none', 'dim'));
+      } else {
+        const result = await agent.updateLLMConfig({
+          provider, model, baseUrl: parts[2],
+        });
+        console.log(colorize(`\n  ${result.message}\n`, result.success ? 'green' : 'red'));
+      }
       rl.prompt();
       return;
     }
