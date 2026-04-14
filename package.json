@@ -11,17 +11,25 @@
     "build": "pnpm -r build",
     "dev": "pnpm --filter @odin/cli dev",
     "start": "pnpm --filter @odin/cli start",
-    "test": "pnpm -r test",
+    "test": "vitest run",
     "lint": "eslint packages/*/src/**/*.ts"
   },
   "pnpm": {
     "overrides": {},
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild", "protobufjs"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "protobufjs"
+    ]
   },
   "license": "MIT",
   "author": "AgentLayers",
   "repository": {
     "type": "git",
     "url": "https://github.com/agentlayers/odin"
+  },
+  "devDependencies": {
+    "docx": "^9.6.1",
+    "vitest": "^3.2.4"
   }
 }

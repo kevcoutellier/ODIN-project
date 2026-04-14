@@ -36,7 +36,16 @@ import { DIDManager, IFCEngine, PolicyEngine, SandboxManager } from '@odin/secur
 import { AgentLayersClient, TrustScoreManager, CircuitBreaker } from '@odin/trust';
 import { AuditLog, DecisionTracer } from '@odin/observability';
 import { DashboardServer, type DashboardState } from '@odin/dashboard';
+import {
+  EpisodicStore, CIKStore, ModelFirstReasoner,
+  SleepAgent, EvolutionSandbox, AMEMController,
+  HierarchicalPlanner, CausalEngine, CIKInvariantVerifier,
+  SelfImprovementLoop,
+  type ToolCallRecord, type MCTSState,
+} from '@odin/cognition';
 import { randomUUID } from 'node:crypto';
+import { createGateway, type BaseGateway } from './gateways/index.js';
+import { A2AServer, A2AClient, type TaskSendPayload, type TaskResultPayload } from './a2a/index.js';
 
 export interface OdinAgentEvents {
   onMessage?: (role: string, content: string) => void;
@@ -89,6 +98,23 @@ export class OdinAgent {
   private recentChats: Array<{ id: string; title: string; timestamp: string }> = [];
   private mcpServers: Array<{ name: string; url: string; score: number; status: 'SAFE' | 'CAUTION' | 'DANGEROUS' }> = [];
 
+  // ─── Cognition (Phase 1) ───
+  private episodicStore!: EpisodicStore;
+  private cikStore!: CIKStore;
+  private reasoner!: ModelFirstReasoner;
+
+  // ─── Cognition (Phase 2) ───
+  private sleepAgent!: SleepAgent;
+  private evolutionSandbox!: EvolutionSandbox;
+  private amem!: AMEMController;
+  private activeTrajectoryId: string | null = null;
+
+  // ─── Cognition (Phase 3) ───
+  private planner!: HierarchicalPlanner;
+  private causalEngine!: CausalEngine;
+  private invariantVerifier!: CIKInvariantVerifier;
+  private selfImprover!: SelfImprovementLoop;
+
   // ─── Advanced Features ───
   private fallbackChain!: ModelFallbackChain;
   private compressor!: ContextCompressor;
@@ -97,6 +123,13 @@ export class OdinAgent {
   private sessionManager!: SessionManager;
   private approvalStore!: ApprovalStore;
   private heartbeatManager!: HeartbeatManager;
+
+  // Gateway
+  private gateway: BaseGateway | null = null;
+
+  // A2A Protocol
+  private a2aServer!: A2AServer;
+  private a2aClient!: A2AClient;
 
   // Built-in tools
   private tools: Map<string, {
@@ -117,7 +150,7 @@ export class OdinAgent {
     await this.did.init();
     const agentDid = this.did.getDID();
 
-    // 2. Initialize Core Runtime
+    // 2. Initialize Core Runtime (LLM is optional — agent boots without one)
     this.router = new DualLLMRouter(this.config.llm, {
       onPrivilegedCall: (msgs) => {
         this.tracer?.startSpan('llm:privileged', { messageCount: msgs.length });
@@ -162,7 +195,49 @@ export class OdinAgent {
       signFn: (data) => this.did.sign(data),
     });
 
-    // 5b. Initialize Advanced Features
+    // 5b. Initialize Cognition (Phase 1)
+    const dbDir = this.config.memory.dbPath.replace(/[^/\\]*$/, '');
+    this.episodicStore = new EpisodicStore(`${dbDir}odin-episodic.db`);
+    await this.episodicStore.init();
+    this.cikStore = new CIKStore(`${dbDir}odin-cik.db`);
+    await this.cikStore.init();
+    this.reasoner = new ModelFirstReasoner();
+
+    // Register agent identity in CIK
+    await this.cikStore.setIdentity('did', agentDid.id, 'did', 'system', 'T1');
+    await this.cikStore.setIdentity('name', this.config.agent.name, 'preference', 'system', 'T1');
+
+    // Register built-in capabilities in CIK
+    // (will be done after registerBuiltinTools)
+
+    // 5c. Initialize Cognition Phase 2
+    this.sleepAgent = new SleepAgent(this.episodicStore, this.cikStore, {
+      intervalMs: 30 * 60 * 1000, // 30 min
+      minEpisodes: 5,
+      batchSize: 50,
+      decayHalfLifeDays: 7,
+      enableDreaming: true,
+      maxDreams: 3,
+    });
+    this.sleepAgent.start();
+
+    this.evolutionSandbox = new EvolutionSandbox(this.cikStore);
+    this.amem = new AMEMController(this.cikStore, this.episodicStore);
+
+    // 5d. Initialize Cognition Phase 3
+    this.planner = new HierarchicalPlanner({ maxIterations: 50, maxDepth: 6 });
+    this.causalEngine = new CausalEngine();
+    this.invariantVerifier = new CIKInvariantVerifier();
+    this.selfImprover = new SelfImprovementLoop(
+      this.causalEngine,
+      this.reasoner,
+      this.cikStore,
+      this.amem,
+      this.evolutionSandbox,
+      this.invariantVerifier,
+    );
+
+    // 5e. Initialize Advanced Features
     this.fallbackChain = new ModelFallbackChain(
       this.config.llm.privileged,
       this.config.llm.fallbacks ?? [],
@@ -217,6 +292,75 @@ export class OdinAgent {
     this.dashboard.onSettingsUpdate(async (section, data) => this.handleSettingsUpdate(section, data));
     await this.dashboard.start();
     this.syncDashboard();
+
+    // 7. Initialize Gateway (Telegram, Discord, etc.)
+    try {
+      this.gateway = createGateway({
+        type: this.config.gateway.type,
+        telegramToken: this.config.gateway.telegramToken ?? process.env.TELEGRAM_BOT_TOKEN,
+        discordToken: this.config.gateway.discordToken ?? process.env.DISCORD_BOT_TOKEN,
+        slackToken: this.config.gateway.slackToken ?? process.env.SLACK_BOT_TOKEN,
+        allowedUsers: this.config.gateway.allowedUsers,
+        requireMention: this.config.gateway.requireMention,
+        streaming: this.config.gateway.streaming,
+      });
+      if (this.gateway) {
+        this.gateway.onChat(async (message) => this.chat(message));
+        await this.gateway.start();
+        this.pushActivity('chat', 'Gateway started', `${this.config.gateway.type} gateway active`);
+      }
+    } catch (err) {
+      console.warn(`[Odin] Gateway init failed: ${err instanceof Error ? err.message : err}`);
+    }
+
+    // 8. Initialize A2A Protocol
+    const a2aPort = (this.config.observability.dashboardPort ?? 3333) + 1;
+    this.a2aServer = new A2AServer({
+      port: a2aPort,
+      minTrustScore: 50,
+    });
+    this.a2aServer.setAgentCard({
+      name: this.config.agent.name,
+      did: agentDid.id,
+      description: this.config.agent.description,
+      capabilities: ['chat', 'tool_execution', 'code_analysis', 'planning'],
+      endpoints: {
+        a2a: `http://localhost:${a2aPort}`,
+        health: `http://localhost:${a2aPort}/health`,
+      },
+      trustScore: this.trustManager.getCurrentScore()?.overall,
+      signature: this.did.sign(agentDid.id),
+    });
+    this.a2aServer.onTask(async (task: TaskSendPayload, fromDid: string) => {
+      this.pushActivity('a2a', 'Task received', `From ${fromDid.slice(0, 20)}...`);
+      try {
+        const result = await this.chat(task.instruction);
+        return {
+          taskId: task.taskId,
+          status: 'completed' as const,
+          result,
+          executionTimeMs: 0,
+        };
+      } catch (err) {
+        return {
+          taskId: task.taskId,
+          status: 'failed' as const,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    });
+    this.a2aServer.onVerify(async (data: string, signature: string, senderDid: string) => {
+      // For now, accept all signed messages (in production, resolve DID to public key)
+      // This will be enhanced with full DID resolution
+      return signature.length > 0;
+    });
+    await this.a2aServer.start();
+
+    this.a2aClient = new A2AClient({
+      agentDid: agentDid.id,
+      signFn: (data: string) => this.did.sign(data),
+      timeoutMs: 30000,
+    });
 
     this.initialized = true;
   }
@@ -396,7 +540,10 @@ export class OdinAgent {
       trustMode: this.trustManager.getMode(),
       gatewayStatus: 'connected',
       uptime: this.getUptime(),
-      llmModel: `${this.config.llm.privileged.model} (${this.config.llm.privileged.provider})`,
+      llmModel: this.getLLMStatus(),
+      llmProvider: this.config.llm.privileged.provider,
+      llmMaxTokens: this.config.llm.privileged.maxTokens ?? 4096,
+      llmTemperature: this.config.llm.privileged.temperature ?? 0.7,
       trustScore: currentScore,
       trustScoreDelta: delta,
       skillsInstalled: this.tools.size,
@@ -472,7 +619,7 @@ export class OdinAgent {
 
   // ─── ACTIVITY PUSH ───
 
-  private pushActivity(type: 'tool_call' | 'chat' | 'a2a' | 'security', action: string, detail: string, tokens?: number, duration?: string): void {
+  private pushActivity(type: 'tool_call' | 'chat' | 'a2a' | 'security' | 'cognition', action: string, detail: string, tokens?: number, duration?: string): void {
     const now = new Date().toISOString().slice(11, 19);
     this.dashboard?.addActivity({ timestamp: now, type, action, detail, tokens, duration });
   }
@@ -508,6 +655,9 @@ export class OdinAgent {
 
     // Push chat activity
     this.pushActivity('chat', 'User message', chatTitle);
+
+    // Start A-MEM trajectory recording
+    this.activeTrajectoryId = this.amem.startTrajectory(userMessage);
 
     try {
       // Step 1: Label user input as TRUSTED
@@ -611,6 +761,68 @@ export class OdinAgent {
         `Preuve valide, racine signée Ed25519 · ${merkleTime.toFixed(1)}ms`,
         'Layer 2 — Supply Chain');
 
+      // Step 5b: Record episode in episodic memory
+      const chatDurationMs = performance.now() - chatStartTime;
+      await this.episodicStore.recordEpisode(
+        this.sessionId,
+        `User: ${userMessage}\n\nAgent: ${finalResponse}`,
+        toolCalls.length > 0 ? 'tool_call' : 'conversation',
+        [], [], // Entity/edge IDs would come from NER extraction (Phase 2)
+        Math.min(1.0, (toolCalls.length * 0.2 + 0.3)), // Importance: higher if tools were used
+        chatDurationMs,
+      );
+
+      // Step 5c: Update world model with observations
+      this.reasoner.observe([
+        { type: 'entity', data: { name: 'user', type: 'person', properties: { lastMessage: userMessage.slice(0, 100) } } },
+        ...(toolCalls.length > 0 ? toolCalls.map(tc => ({
+          type: 'relationship' as const,
+          data: { from: this.config.agent.name, to: tc.name, relation: 'used_tool', strength: 0.5 },
+        })) : []),
+      ]);
+
+      // Step 5d: Record tool capabilities in CIK
+      for (const tc of toolCalls) {
+        await this.cikStore.recordCapabilityUsage(tc.name, true);
+      }
+
+      // Step 5e: End A-MEM trajectory + compress if successful
+      if (this.activeTrajectoryId && toolCalls.length > 0) {
+        const procedure = await this.amem.endTrajectory(this.activeTrajectoryId, true);
+        if (procedure) {
+          this.pushActivity('cognition', 'A-MEM',
+            `Learned procedure: ${procedure.name} (${procedure.steps.length} steps)`);
+        }
+        this.activeTrajectoryId = null;
+      }
+
+      // Step 5f: Run auto-evolution (check if any knowledge is ready to tier up)
+      if (this.chatCount % 10 === 0) { // Every 10 chats
+        const evo = await this.evolutionSandbox.autoEvolve();
+        if (evo.committed > 0) {
+          this.pushActivity('cognition', 'Evolution',
+            `Auto-evolved ${evo.committed} knowledge entries`);
+        }
+      }
+
+      // Step 5g: Run self-improvement cycle (every 15 chats)
+      if (this.chatCount % 15 === 0) {
+        const siReport = await this.selfImprover.runCycle();
+        if (siReport.insightsApplied > 0) {
+          this.pushActivity('cognition', 'Self-Improvement',
+            `Applied ${siReport.insightsApplied} insights from ${siReport.failuresAnalyzed} failures`);
+        }
+      }
+
+      // Step 5h: Run invariant verification (every 25 chats)
+      if (this.chatCount % 25 === 0) {
+        const invReport = await this.invariantVerifier.verify(this.cikStore);
+        if (invReport.overallHealth !== 'healthy') {
+          this.pushActivity('cognition', 'Invariants',
+            `CIK health: ${invReport.overallHealth} — ${invReport.violations.length} violations`);
+        }
+      }
+
       // Step 6: Update conversation history (cap at 100 entries)
       this.conversationHistory.push({ role: 'user', content: userMessage });
       this.conversationHistory.push({ role: 'assistant', content: finalResponse });
@@ -639,6 +851,11 @@ export class OdinAgent {
 
     } catch (error) {
       this.failCount++;
+      // End A-MEM trajectory as failed
+      if (this.activeTrajectoryId) {
+        await this.amem.endTrajectory(this.activeTrajectoryId, false).catch(() => {});
+        this.activeTrajectoryId = null;
+      }
       this.pushActivity('security', 'Error', String(error));
       this.tracer.endSpan('error', { error: String(error) });
       this.tracer.endTrace();
@@ -796,6 +1013,20 @@ export class OdinAgent {
       this.successCount++;
     } else {
       this.failCount++;
+      // Record failure for self-improvement analysis
+      this.selfImprover.recordToolFailure(toolCall.name, toolCall.arguments, result.content);
+    }
+
+    // Record in A-MEM trajectory
+    if (this.activeTrajectoryId) {
+      this.amem.recordCall(this.activeTrajectoryId, {
+        tool: toolCall.name,
+        args: toolCall.arguments,
+        result: result.content.slice(0, 500),
+        success: result.success,
+        durationMs: performance.now() - sandboxStart,
+        timestamp: Date.now(),
+      });
     }
 
     // Push tool call activity with real duration
@@ -848,6 +1079,17 @@ export class OdinAgent {
       `Trust: ${trustMode} | DID: ${this.did.getDID().id} | Session: ${this.sessionId}`,
       `Uptime: ${this.getUptime()} | Tools used: ${this.dailyCallCount} | Tokens: ${this.totalTokens}`,
       `Approval: ${this.config.security.approvalMode ?? 'manual'} | Loop detection: ${this.config.security.loopDetection?.enabled !== false ? 'ON' : 'OFF'}`,
+      '',
+      // Inject world model from Model-First Reasoner
+      this.reasoner.getWorldModelPrompt(),
+      // Inject hierarchical plan context
+      this.planner.getPlanningPrompt(),
+      // Inject causal reasoning insights
+      this.causalEngine.getCausalPrompt(),
+      // Inject self-improvement insights
+      this.selfImprover.getImprovementPrompt(),
+      // Inject CIK invariant status
+      this.invariantVerifier.getInvariantPrompt(),
     ];
 
     if (trustMode === 'CAUTION') {
@@ -855,6 +1097,18 @@ export class OdinAgent {
     }
 
     return parts.join('\n');
+  }
+
+  /**
+   * Get procedural memory context for the current task.
+   * Called separately to avoid making buildSystemPrompt async.
+   */
+  private async getProceduralContext(taskDescription: string): Promise<string> {
+    try {
+      return await this.amem.getProceduralPrompt(taskDescription);
+    } catch {
+      return '';
+    }
   }
 
   private getToolDefinitions(): ToolDefinition[] {
@@ -1387,11 +1641,20 @@ export class OdinAgent {
    * Update LLM configuration at runtime from the dashboard UI.
    */
   private async handleConfigUpdate(cfg: {
-    model?: string; temperature?: number; maxTokens?: number; baseUrl?: string;
+    provider?: string; model?: string; temperature?: number; maxTokens?: number; baseUrl?: string; apiKey?: string;
   }): Promise<{ success: boolean; message: string }> {
     try {
       const changes: string[] = [];
 
+      if (cfg.provider) {
+        const allowed = ['anthropic', 'openai', 'ollama', 'none'] as const;
+        if (!allowed.includes(cfg.provider as any)) {
+          return { success: false, message: `Invalid provider "${cfg.provider}". Allowed: ${allowed.join(', ')}` };
+        }
+        this.config.llm.privileged.provider = cfg.provider as any;
+        this.config.llm.quarantined.provider = cfg.provider as any;
+        changes.push(`provider → ${cfg.provider}`);
+      }
       if (cfg.model) {
         this.config.llm.privileged.model = cfg.model;
         this.config.llm.quarantined.model = cfg.model;
@@ -1410,6 +1673,11 @@ export class OdinAgent {
         this.config.llm.privileged.baseUrl = cfg.baseUrl;
         this.config.llm.quarantined.baseUrl = cfg.baseUrl;
         changes.push(`baseUrl → ${cfg.baseUrl}`);
+      }
+      if (cfg.apiKey) {
+        this.config.llm.privileged.apiKey = cfg.apiKey;
+        this.config.llm.quarantined.apiKey = cfg.apiKey;
+        changes.push('apiKey updated');
       }
 
       // Recreate the LLM router with new config
@@ -1532,6 +1800,9 @@ export class OdinAgent {
 
   async close(): Promise<void> {
     try { this.heartbeatManager?.stop(); } catch {}
+    try { this.sleepAgent?.stop(); } catch {}
+    try { await this.episodicStore?.close(); } catch {}
+    try { await this.cikStore?.close(); } catch {}
     try { await this.memory?.close(); } catch {}
     try { await this.dashboard?.stop(); } catch {}
   }
@@ -1543,4 +1814,13 @@ export class OdinAgent {
   getSessionId() { return this.sessionId; }
   getAuditReport() { return this.auditLog.exportComplianceReport(); }
   getDashboardPort() { return this.config.observability.dashboardPort; }
+  isLLMConfigured() { return this.config.llm.privileged.provider !== 'none'; }
+  getLLMStatus(): string {
+    const p = this.config.llm.privileged;
+    if (p.provider === 'none') return 'Not configured — use dashboard or odin.yaml to set up';
+    return `${p.model} (${p.provider})`;
+  }
+  async updateLLMConfig(cfg: { provider?: string; model?: string; baseUrl?: string; apiKey?: string }) {
+    return this.handleConfigUpdate(cfg);
+  }
 }

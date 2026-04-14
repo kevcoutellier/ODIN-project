@@ -12,15 +12,18 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@odin/cognition": "workspace:*",
     "@odin/core": "workspace:*",
+    "@odin/dashboard": "workspace:*",
+    "@odin/observability": "workspace:*",
     "@odin/security": "workspace:*",
     "@odin/trust": "workspace:*",
-    "@odin/observability": "workspace:*",
-    "@odin/dashboard": "workspace:*",
+    "ws": "^8.20.0",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
