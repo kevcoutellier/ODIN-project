@@ -45,6 +45,10 @@ export class MerkleTree {
     const index = this.leaves.indexOf(leafHash);
     if (index === -1) return [];
 
+    // Single-leaf tree: root === leaf, so no proof steps are needed.
+    // An empty proof combined with leafHash === rootHash is accepted by verify().
+    if (this.leaves.length === 1) return [];
+
     const proof: Array<{ hash: string; position: 'left' | 'right' }> = [];
     let currentLevel = [...this.leaves];
 
@@ -88,6 +92,10 @@ export class MerkleTree {
     proof: Array<{ hash: string; position: 'left' | 'right' }>,
     rootHash: string,
   ): boolean {
+    // Single-leaf trees have no siblings to hash against, so the proof is
+    // empty and the leaf itself is the root.
+    if (proof.length === 0) return leafHash === rootHash;
+
     let currentHash = leafHash;
 
     for (const step of proof) {

@@ -17,6 +17,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/security/package.json packages/security/
 COPY packages/trust/package.json packages/trust/
+COPY packages/observability/package.json packages/observability/
 COPY packages/cognition/package.json packages/cognition/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
@@ -46,6 +47,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/security/package.json packages/security/
 COPY packages/trust/package.json packages/trust/
+COPY packages/observability/package.json packages/observability/
 COPY packages/cognition/package.json packages/cognition/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
@@ -57,10 +59,10 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/packages/core/dist packages/core/dist
 COPY --from=builder /app/packages/security/dist packages/security/dist
 COPY --from=builder /app/packages/trust/dist packages/trust/dist
+COPY --from=builder /app/packages/observability/dist packages/observability/dist
 COPY --from=builder /app/packages/cognition/dist packages/cognition/dist
 COPY --from=builder /app/packages/cli/dist packages/cli/dist
 COPY --from=builder /app/packages/dashboard/dist packages/dashboard/dist
-COPY --from=builder /app/packages/dashboard/public packages/dashboard/public
 
 # Create data directory for SQLite databases
 RUN mkdir -p /app/data && chown -R odin:odin /app
