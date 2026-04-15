@@ -63,7 +63,6 @@ COPY --from=builder /app/packages/observability/dist packages/observability/dist
 COPY --from=builder /app/packages/cognition/dist packages/cognition/dist
 COPY --from=builder /app/packages/cli/dist packages/cli/dist
 COPY --from=builder /app/packages/dashboard/dist packages/dashboard/dist
-COPY --from=builder /app/packages/dashboard/public packages/dashboard/public
 
 # Create data directory for SQLite databases
 RUN mkdir -p /app/data && chown -R odin:odin /app
