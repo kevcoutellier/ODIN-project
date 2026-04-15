@@ -104,12 +104,16 @@ export class CircuitBreaker {
       case 'DEGRADED':
         return true;
       case 'HALF_OPEN':
-        return this.halfOpenAttempts < this.config.halfOpenMaxAttempts;
+        // Bound the probe budget: only halfOpenMaxAttempts concurrent
+        // calls are allowed through while we're testing recovery.
+        if (this.halfOpenAttempts >= this.config.halfOpenMaxAttempts) return false;
+        this.halfOpenAttempts++;
+        return true;
       case 'OPEN': {
         const elapsed = Date.now() - this.metrics.lastFailureTime;
         if (elapsed >= this.config.recoveryTimeout) {
           this.transition('HALF_OPEN');
-          this.halfOpenAttempts = 0;
+          this.halfOpenAttempts = 1; // this call consumes one probe
           return true;
         }
         return false;

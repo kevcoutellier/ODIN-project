@@ -40,10 +40,16 @@ export class MerkleTree {
 
   /**
    * Generate a proof that a specific leaf is part of the tree.
+   *
+   * For a single-leaf tree, the leaf IS the root, so the proof is empty.
+   * `verify()` accepts an empty proof when `leafHash === rootHash`.
    */
   getProof(leafHash: string): Array<{ hash: string; position: 'left' | 'right' }> {
     const index = this.leaves.indexOf(leafHash);
     if (index === -1) return [];
+
+    // Single-leaf tree: leaf is the root, no sibling hashes needed.
+    if (this.leaves.length === 1) return [];
 
     const proof: Array<{ hash: string; position: 'left' | 'right' }> = [];
     let currentLevel = [...this.leaves];

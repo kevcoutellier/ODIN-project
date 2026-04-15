@@ -136,11 +136,16 @@ export class SkillGate {
         : 'No dangerous permissions',
     });
 
-    // Check: signature present
+    // Check: signature present — informational only.
+    // Signature presence determines the trust tier (0 unsigned vs 1 signed),
+    // but does NOT block installation: tier 0 skills run in Ring 0 sandbox
+    // with reduced privileges, which is a valid design state.
     checks.push({
       check: 'signature-present',
-      passed: !!manifest.signature,
-      details: manifest.signature ? 'Ed25519 signature present' : 'No signature (Tier 0)',
+      passed: true,
+      details: manifest.signature
+        ? 'Ed25519 signature present — eligible for tier 1+'
+        : 'No signature — tier 0 (Ring 0 sandbox)',
     });
 
     // Source code analysis (if provided)

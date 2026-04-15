@@ -104,12 +104,24 @@ export class DIDManager {
 
   /**
    * Verify a signature against a public key.
+   *
+   * Returns false for ANY invalid input (malformed base64, wrong length,
+   * bad signature, mismatched key). Never throws — a Zero Trust verifier
+   * must treat adversarial input as a simple rejection, not a crash
+   * surface. Underlying crypto errors (e.g. nacl's "bad signature size")
+   * are caught and converted to a false return.
    */
   static verify(data: string, signature: string, publicKeyBase64: string): boolean {
-    const message = new TextEncoder().encode(data);
-    const sig = Buffer.from(signature, 'base64');
-    const publicKey = Buffer.from(publicKeyBase64, 'base64');
-    return nacl.sign.detached.verify(message, sig, publicKey);
+    try {
+      const message = new TextEncoder().encode(data);
+      const sig = Buffer.from(signature, 'base64');
+      const publicKey = Buffer.from(publicKeyBase64, 'base64');
+      // nacl throws on wrong sig/key lengths — we want a boolean instead
+      if (sig.length !== 64 || publicKey.length !== 32) return false;
+      return nacl.sign.detached.verify(message, sig, publicKey);
+    } catch {
+      return false;
+    }
   }
 
   /**
