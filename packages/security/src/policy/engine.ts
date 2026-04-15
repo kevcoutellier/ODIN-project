@@ -90,7 +90,7 @@ export class PolicyEngine {
         id: 'ring0-readonly',
         effect: 'forbid',
         action: /^tool\.invoke$/,
-        resource: /^(write|delete|exec|send)/,
+        resource: /^(write|delete|exec|send)(_|$)/i,
         conditions: [
           { field: 'ring', operator: 'eq', value: 0 },
         ],

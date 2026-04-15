@@ -76,6 +76,44 @@ describe('PolicyEngine', () => {
     expect(result.allowed).toBe(false);
   });
 
+  describe('ring0-readonly regex', () => {
+    const baseCtx = (resource: string): PolicyContext => ({
+      agentDid: 'did:odin:test',
+      action: 'tool.invoke',
+      resource,
+      trustScore: 80,
+      sessionTtl: 3600,
+      dailyCalls: 0,
+      humanApproval: false,
+      ring: 0,
+      taintLabel: { integrity: IntegrityLevel.TRUSTED, confidentiality: ConfidentialityLevel.PUBLIC, source: 'user', timestamp: Date.now() },
+    });
+
+    it('blocks write_file in ring 0 (baseline)', () => {
+      const engine = new PolicyEngine();
+      engine.loadDefaults();
+      expect(engine.evaluate(baseCtx('write_file')).allowed).toBe(false);
+    });
+
+    it('allows writer_helper in ring 0 (suffix must be _ or end-of-string)', () => {
+      const engine = new PolicyEngine();
+      engine.loadDefaults();
+      expect(engine.evaluate(baseCtx('writer_helper')).allowed).toBe(true);
+    });
+
+    it('blocks WRITE_FILE in ring 0 (case-insensitive)', () => {
+      const engine = new PolicyEngine();
+      engine.loadDefaults();
+      expect(engine.evaluate(baseCtx('WRITE_FILE')).allowed).toBe(false);
+    });
+
+    it('blocks Exec_Shell in ring 0 (mixed case)', () => {
+      const engine = new PolicyEngine();
+      engine.loadDefaults();
+      expect(engine.evaluate(baseCtx('Exec_Shell')).allowed).toBe(false);
+    });
+  });
+
   it('evaluates in sub-millisecond time', () => {
     const engine = new PolicyEngine();
     engine.loadDefaults();
