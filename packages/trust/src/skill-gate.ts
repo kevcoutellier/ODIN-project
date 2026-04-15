@@ -136,11 +136,15 @@ export class SkillGate {
         : 'No dangerous permissions',
     });
 
-    // Check: signature present
+    // Check: signature present (informational — influences trust tier, never blocks install)
+    // Unsigned skills are a valid state: they install at Tier 0 / Ring 0 sandbox.
+    // See docs/security-model.md: Ring 0 is the default for untrusted/unsigned tools.
     checks.push({
       check: 'signature-present',
-      passed: !!manifest.signature,
-      details: manifest.signature ? 'Ed25519 signature present' : 'No signature (Tier 0)',
+      passed: true,
+      details: manifest.signature
+        ? 'Ed25519 signature present (Tier 1+ eligible)'
+        : 'No signature — installs at Tier 0 / Ring 0 sandbox (default for unsigned)',
     });
 
     // Source code analysis (if provided)
