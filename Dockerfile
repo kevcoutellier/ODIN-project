@@ -15,6 +15,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json ./
 
 # Copy all package.json files (for dependency resolution)
 COPY packages/core/package.json packages/core/
+COPY packages/observability/package.json packages/observability/
 COPY packages/security/package.json packages/security/
 COPY packages/trust/package.json packages/trust/
 COPY packages/cognition/package.json packages/cognition/
@@ -44,6 +45,7 @@ WORKDIR /app
 # Copy workspace config
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json ./
 COPY packages/core/package.json packages/core/
+COPY packages/observability/package.json packages/observability/
 COPY packages/security/package.json packages/security/
 COPY packages/trust/package.json packages/trust/
 COPY packages/cognition/package.json packages/cognition/
@@ -55,6 +57,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 # Copy built artifacts from builder
 COPY --from=builder /app/packages/core/dist packages/core/dist
+COPY --from=builder /app/packages/observability/dist packages/observability/dist
 COPY --from=builder /app/packages/security/dist packages/security/dist
 COPY --from=builder /app/packages/trust/dist packages/trust/dist
 COPY --from=builder /app/packages/cognition/dist packages/cognition/dist
