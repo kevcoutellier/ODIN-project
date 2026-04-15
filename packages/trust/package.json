@@ -10,7 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@odin/core": "workspace:*"
+    "@odin/core": "workspace:*",
+    "acorn": "^8.14.0",
+    "acorn-walk": "^8.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

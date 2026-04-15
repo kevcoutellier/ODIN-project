@@ -9,6 +9,7 @@
 
 import type { SkillManifest, SkillTrustTier, SandboxRing } from '@odin/core';
 import type { AgentLayersClient, SkillScanResult } from './agentlayers-client.js';
+import { runAstChecks } from './ast-checker.js';
 
 export interface SkillGateDecision {
   allowed: boolean;
@@ -25,7 +26,11 @@ export interface LocalCheckResult {
   details: string;
 }
 
-// Known dangerous patterns in skill code/manifests
+/**
+ * Legacy regex patterns — only used as a fallback when AST parsing fails
+ * (e.g. the source is TypeScript or uses syntax acorn doesn't understand).
+ * For the canonical detection path see `ast-checker.ts`.
+ */
 const INJECTION_PATTERNS = [
   /eval\s*\(/i,
   /exec\s*\(/i,
@@ -145,17 +150,34 @@ export class SkillGate {
 
     // Source code analysis (if provided)
     if (sourceCode) {
-      // Check: no injection patterns
-      const injectionMatches = INJECTION_PATTERNS.filter(p => p.test(sourceCode));
-      checks.push({
-        check: 'CRITICAL:no-injection-patterns',
-        passed: injectionMatches.length === 0,
-        details: injectionMatches.length > 0
-          ? `Injection patterns detected: ${injectionMatches.map(p => p.source).join(', ')}`
-          : 'No injection patterns detected',
-      });
+      // Prefer AST-based detection; fall back to regex only on parse errors.
+      const ast = runAstChecks(sourceCode);
+      if (ast.parseOk) {
+        checks.push({
+          check: 'CRITICAL:no-injection-patterns',
+          passed: ast.findings.length === 0,
+          details:
+            ast.findings.length > 0
+              ? `Injection patterns detected: ${ast.findings
+                  .map(f => `${f.rule}@L${f.line}`)
+                  .join(', ')}`
+              : 'No injection patterns detected (AST)',
+        });
+      } else {
+        const injectionMatches = INJECTION_PATTERNS.filter(p => p.test(sourceCode));
+        checks.push({
+          check: 'CRITICAL:no-injection-patterns',
+          passed: injectionMatches.length === 0,
+          details:
+            injectionMatches.length > 0
+              ? `Injection patterns detected (regex fallback): ${injectionMatches
+                  .map(p => p.source)
+                  .join(', ')}`
+              : 'No injection patterns detected (regex fallback)',
+        });
+      }
 
-      // Check: no undeclared network access
+      // Check: no undeclared network access (regex-based — out of scope for AST work)
       const hasNetworkPerms = allPermissions.some(p => p.toLowerCase().includes('network'));
       const networkPatterns = UNDECLARED_NETWORK_PATTERNS.filter(p => p.test(sourceCode));
       checks.push({
