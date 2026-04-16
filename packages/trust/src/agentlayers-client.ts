@@ -194,6 +194,101 @@ export class AgentLayersClient {
 }
 
 /**
+ * Local trust metrics — the inputs to `computeLocalBaseline`.
+ *
+ * The three original fields (uptime / successRate / violationCount) feed
+ * the performance, security, and reliability dimensions. The remaining
+ * three dimensions (transparency, compliance, reputation) used to be
+ * hardcoded constants; they now consume real evidence from the audit log,
+ * the policy engine, and the A2A peer history. When a given piece of
+ * evidence is missing, we keep the dimension but surface that explicitly
+ * via `LocalTrustExplanation.dimensionEvidence` so callers can tell
+ * "computed from N data points" apart from "unknown, neutral baseline".
+ */
+export interface LocalTrustMetrics {
+  /** Percentage 0–100 (effective uptime over the rolling window). */
+  uptime: number;
+  /** Fraction 0–1 of successful tool / action invocations. */
+  successRate: number;
+  /** Number of IFC / policy violations observed. */
+  violationCount: number;
+
+  // --- transparency evidence (all optional) ---
+  auditEntriesTotal?: number;
+  auditEntriesSigned?: number;
+  auditEntriesWithReason?: number;
+
+  // --- compliance evidence ---
+  policyEvaluationsTotal?: number;
+  policyEvaluationsDenied?: number;
+  humanApprovalRequiredCount?: number;
+  humanApprovalGrantedCount?: number;
+
+  // --- reputation evidence ---
+  peerInteractionsCount?: number;
+  peerSuccessfulVerifications?: number;
+  operationalDays?: number;
+}
+
+export interface LocalTrustExplanation {
+  dimensionEvidence: Record<
+    'performance' | 'transparency' | 'security' | 'compliance' | 'reputation' | 'reliability',
+    'computed' | 'neutral-baseline'
+  >;
+}
+
+function clamp01to100(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+/**
+ * Compute transparency from signed / reasoned audit entries.
+ * Returns `null` if there are no entries to evaluate.
+ */
+function transparencyFromEvidence(m: LocalTrustMetrics): number | null {
+  const total = m.auditEntriesTotal ?? 0;
+  if (total <= 0) return null;
+  const signed = (m.auditEntriesSigned ?? 0) / total;
+  const reasoned = (m.auditEntriesWithReason ?? 0) / total;
+  // Weighted: reasons matter slightly more than signatures for transparency;
+  // an entry without a reason tells an auditor nothing even if signed.
+  return clamp01to100((signed * 0.4 + reasoned * 0.6) * 100);
+}
+
+/**
+ * Compute compliance from active enforcement: did the policy engine actually
+ * run, did it deny anything, and when human approval was required was it
+ * obtained. With no evaluations on record we return null.
+ */
+function complianceFromEvidence(m: LocalTrustMetrics): number | null {
+  const total = m.policyEvaluationsTotal ?? 0;
+  if (total <= 0) return null;
+  const denialRate = (m.policyEvaluationsDenied ?? 0) / total;
+  // Presence of enforcement is evidence — 40 pts just for running the engine;
+  // denials above 0 show the engine isn't a rubber stamp (+ up to 40 pts);
+  // human oversight compliance tops it off (+ up to 20 pts).
+  const required = m.humanApprovalRequiredCount ?? 0;
+  const granted = m.humanApprovalGrantedCount ?? 0;
+  const oversightFrac = required > 0 ? granted / required : 1;
+  const enforcementBonus = Math.min(40, denialRate * 200); // 20% denials → full
+  return clamp01to100(40 + enforcementBonus + oversightFrac * 20);
+}
+
+/**
+ * Compute reputation from peer interaction history + operational maturity.
+ * With no peer data at all we return null rather than invent a number.
+ */
+function reputationFromEvidence(m: LocalTrustMetrics): number | null {
+  const peers = m.peerInteractionsCount ?? 0;
+  const days = m.operationalDays ?? 0;
+  if (peers <= 0 && days <= 0) return null;
+  const peerFrac = peers > 0 ? (m.peerSuccessfulVerifications ?? 0) / peers : 0;
+  const maturityFrac = Math.min(1, days / 90); // 90 days → full maturity credit
+  return clamp01to100((peerFrac * 0.6 + maturityFrac * 0.4) * 100);
+}
+
+/**
  * Trust Score Manager — handles self-audit cycle and mode transitions.
  */
 export class TrustScoreManager {
@@ -201,6 +296,7 @@ export class TrustScoreManager {
   private mode: TrustMode = 'SAFE';
   private history: TrustScore[] = [];
   private listeners: Array<(mode: TrustMode, score: TrustScore) => void> = [];
+  private lastExplanation: LocalTrustExplanation | null = null;
 
   constructor(
     private client: AgentLayersClient,
@@ -229,26 +325,62 @@ export class TrustScoreManager {
   }
 
   /**
-   * When AgentLayers is not available, compute a local baseline score.
+   * When AgentLayers is not available, compute a local baseline score from
+   * real runtime evidence. Each of the 6 dimensions is either:
+   *   - "computed"          — derived from local data (marked in `dimensionEvidence`)
+   *   - "neutral-baseline"  — no evidence available, use a conservative default
+   * The distinction is retained on `getLastExplanation()` so the dashboard
+   * can show "computed from N audit entries" vs "baseline only".
    */
-  computeLocalBaseline(metrics: {
-    uptime: number;
-    successRate: number;
-    violationCount: number;
-  }): TrustScore {
+  computeLocalBaseline(metrics: LocalTrustMetrics): TrustScore {
+    const performance = clamp01to100(metrics.uptime);
+    const security = clamp01to100(100 - metrics.violationCount * 10);
+    const reliability = clamp01to100(metrics.successRate * 100);
+
+    const NEUTRAL_TRANSPARENCY = 70;
+    const NEUTRAL_COMPLIANCE = 50;
+    const NEUTRAL_REPUTATION = 50;
+
+    const transparencyComputed = transparencyFromEvidence(metrics);
+    const complianceComputed = complianceFromEvidence(metrics);
+    const reputationComputed = reputationFromEvidence(metrics);
+
+    const transparency = transparencyComputed ?? NEUTRAL_TRANSPARENCY;
+    const compliance = complianceComputed ?? NEUTRAL_COMPLIANCE;
+    const reputation = reputationComputed ?? NEUTRAL_REPUTATION;
+
+    this.lastExplanation = {
+      dimensionEvidence: {
+        performance: 'computed',
+        transparency: transparencyComputed === null ? 'neutral-baseline' : 'computed',
+        security: 'computed',
+        compliance: complianceComputed === null ? 'neutral-baseline' : 'computed',
+        reputation: reputationComputed === null ? 'neutral-baseline' : 'computed',
+        reliability: 'computed',
+      },
+    };
+
+    // Overall = weighted mean of the six dimensions. Weights mirror the
+    // original emphasis (security+reliability heaviest) while giving the
+    // three newly-computed dimensions real voice.
+    const overall = clamp01to100(
+      performance * 0.15 +
+      transparency * 0.15 +
+      security * 0.25 +
+      compliance * 0.15 +
+      reputation * 0.10 +
+      reliability * 0.20,
+    );
+
     const score: TrustScore = {
-      overall: Math.max(0, Math.min(100,
-        (metrics.uptime * 0.2 +
-         metrics.successRate * 100 * 0.3 +
-         Math.max(0, 100 - metrics.violationCount * 10) * 0.5)
-      )),
+      overall,
       dimensions: {
-        performance: metrics.uptime,
-        transparency: 80, // baseline for open source
-        security: Math.max(0, 100 - metrics.violationCount * 10),
-        compliance: 50, // unknown without AgentLayers
-        reputation: 50, // unknown without network data
-        reliability: metrics.successRate * 100,
+        performance,
+        transparency,
+        security,
+        compliance,
+        reputation,
+        reliability,
       },
       timestamp: Date.now(),
       certifiedBy: 'self:local-baseline',
@@ -257,6 +389,10 @@ export class TrustScoreManager {
     this.currentScore = score;
     this.mode = trustModeFromScore(score.overall);
     return score;
+  }
+
+  getLastExplanation(): LocalTrustExplanation | null {
+    return this.lastExplanation;
   }
 
   getMode(): TrustMode {
