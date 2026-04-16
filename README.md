@@ -10,6 +10,7 @@ Odin is an open-source autonomous AI agent built on Zero Trust principles. Every
 
 ## Table of Contents
 
+- [Feature Status Legend](#feature-status-legend)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
@@ -25,6 +26,20 @@ Odin is an open-source autonomous AI agent built on Zero Trust principles. Every
 
 ---
 
+## Feature Status Legend
+
+Every feature listed in the Architecture section below carries one of three status badges. The intent is to keep this README a truthful map of the codebase rather than an aspirational one.
+
+| Badge | Meaning |
+|-------|---------|
+| ✅ **Shipped** | Implemented, covered by tests, behaves as described on `main`. |
+| 🔨 **In Progress** | Scaffolded and partially working — usable but with caveats called out inline. |
+| 📋 **Planned** | Design-only at this stage; no runtime code yet. |
+
+If you find a claim in this file that does not match the code, that is a bug — please open an issue.
+
+---
+
 ## Architecture
 
 Odin is organized as a TypeScript monorepo of **7 packages** built around 4 subsystems.
@@ -33,48 +48,48 @@ Odin is organized as a TypeScript monorepo of **7 packages** built around 4 subs
 
 The execution backbone of the agent.
 
-- **LLM Router** — Dual-LLM CaMeL pattern with a *privileged* model (planning, tool calls) and a *quarantined* model (untrusted output processing)
-- **Provider Adapters** — `AnthropicAdapter`, `OpenAIAdapter`, `OllamaAdapter`, and `NullAdapter` (boot with no LLM, plug one in at runtime)
-- **Memory Store** — SQLite + FTS5 full-text search with Merkle tree integrity verification
-- **Skill Loader** — Dynamic capability loading with security scanning
+- ✅ **LLM Router** — Dual-LLM CaMeL pattern with a *privileged* model (planning, tool calls) and a *quarantined* model (untrusted output processing)
+- ✅ **Provider Adapters** — `AnthropicAdapter`, `OpenAIAdapter`, `OllamaAdapter`, and `NullAdapter` (boot with no LLM, plug one in at runtime)
+- ✅ **Memory Store** — SQLite + FTS5 full-text search with Merkle tree integrity verification
+- 📋 **Skill Loader** — Dynamic capability loading with security scanning. *Planned — no runtime loader yet; skill manifests are defined as types only.*
 
 ### 2. Security Perimeter — `@odin/security`
 
 Local, free, always-on security layer.
 
-- **IFC Engine** — FIDES-inspired Information Flow Control with dual-lattice taint tracking (integrity × confidentiality)
-- **Sandbox Manager** — Docker / gVisor execution isolation with Ring 0 / 1 / 2 privilege levels
-- **Policy Engine** — Cedar-inspired declarative access policies, sub-millisecond evaluation
-- **DID Manager** — Ed25519 decentralized identity, signed messages, ephemeral task-scoped credentials
+- ✅ **IFC Engine** — FIDES-inspired Information Flow Control with dual-lattice taint tracking (integrity × confidentiality)
+- 🔨 **Sandbox Manager** — Ring 0 / 1 / 2 privilege taxonomy with resource limits is implemented today as an in-process timeout wrapper; a real process-level isolate (`child_process.fork` + structured-clone IPC) is in development. Docker / gVisor backends remain 📋 planned — they are an orchestration decision, not a runtime one.
+- ✅ **Policy Engine** — Cedar-inspired declarative access policies, sub-millisecond evaluation
+- ✅ **DID Manager** — Ed25519 decentralized identity, signed messages, ephemeral task-scoped credentials
 
 ### 3. Trust Mesh — `@odin/trust`
 
 Network-level trust verification via the AgentLayers API (optional paid tier — the agent is fully functional without it).
 
-- **Trust Score** — 6-dimensional live evaluation (performance, transparency, security, compliance, reputation, reliability)
-- **Circuit Breaker** — 5-state protection: `CLOSED → DEGRADED → OPEN → HALF_OPEN` (DEGRADED is an Odin innovation)
-- **Skill / MCP / A2A Scanners** — Static and dynamic supply-chain analysis
-- **EU AI Act Compliance** — Regulatory-aware decision logging
+- 🔨 **Trust Score** — 6-dimensional model (performance, transparency, security, compliance, reputation, reliability). Three dimensions are computed from real local evidence (performance, security, reliability); the other three currently fall back to neutral baselines when the AgentLayers API is unavailable. Evidence-based computation for all six is in development.
+- ✅ **Circuit Breaker** — 5-state protection: `CLOSED → DEGRADED → OPEN → HALF_OPEN` (DEGRADED is an Odin innovation)
+- 🔨 **Skill / MCP / A2A Scanners** — Wire protocol + client exists; scanner engines are hosted on the AgentLayers side and require an API key. Local adversarial tests cover the client, not the backend.
+- 🔨 **EU AI Act Compliance** — `AuditLog.exportComplianceReport()` produces decision summaries suitable as Article-50 evidence; a dedicated Article 13 / 14 checker module is in development.
 
 ### 4. Cognition — `@odin/cognition` *(new)*
 
 Reasoning, memory and self-improvement, organised in three progressive phases.
 
-| Phase | Components |
-|-------|------------|
-| **Phase 1 — Foundation** | `EpisodicStore` (Graphiti-style graph memory), `CIK` taxonomy (Capabilities / Identity / Knowledge), `ModelFirstReasoner` (world model + counterfactuals) |
-| **Phase 2 — Autonomy** | `SleepAgent` (offline consolidation), `EvolutionSandbox` (T1→T4 tier progression with rollback), `AMEMController` (trajectory-compressed procedural memory) |
-| **Phase 3 — Advanced Reasoning** | `MCTSPlanner` + `HierarchicalPlanner`, `CausalEngine` (Pearl's 3-level SCM with do-calculus), `CIKInvariantVerifier` (TLA+-inspired formal invariants), `SelfImprovementLoop` (closed-loop failure analysis) |
+| Phase | Components | Status |
+|-------|------------|--------|
+| **Phase 1 — Foundation** | `EpisodicStore` (Graphiti-style graph memory), `CIK` taxonomy (Capabilities / Identity / Knowledge), `ModelFirstReasoner` (world model + counterfactuals) | 🔨 In progress — modules scaffolded with tests, end-to-end wiring into the agent loop still underway |
+| **Phase 2 — Autonomy** | `SleepAgent` (offline consolidation), `EvolutionSandbox` (T1→T4 tier progression with rollback), `AMEMController` (trajectory-compressed procedural memory) | 🔨 In progress — individual components unit-tested; orchestrator that runs them in a live session is 📋 planned |
+| **Phase 3 — Advanced Reasoning** | `MCTSPlanner` + `HierarchicalPlanner`, `CausalEngine` (Pearl's 3-level SCM with do-calculus), `CIKInvariantVerifier` (TLA+-inspired formal invariants), `SelfImprovementLoop` (closed-loop failure analysis) | 🔨 In progress — algorithms implemented and tested in isolation; integration with the decision loop is 📋 planned |
 
 ### 5. Observability — `@odin/observability` + `@odin/dashboard`
 
 Full visibility into agent behaviour.
 
-- **OpenTelemetry** — Distributed tracing for every decision and action
-- **DecisionTracer** — Step-by-step reasoning audit trail
-- **AuditLog** — Append-only, tamper-evident log
-- **ComplianceReporter** — EU AI Act, OWASP ASI, Singapore MGF, SLSA tracking
-- **Dashboard** — Real-time WebSocket UI with live KPIs, AEGIS panel, hover tooltips on every setting
+- 🔨 **OpenTelemetry-compatible tracing** — `DecisionTracer` emits spans with the OTel shape (traceId / spanId / attributes). An actual `@opentelemetry/*` SDK exporter is 📋 planned — today spans live in memory and on the dashboard, not in an OTel collector.
+- ✅ **DecisionTracer** — Step-by-step reasoning audit trail
+- ✅ **AuditLog** — Append-only, signed log (file-backed, Ed25519-verifiable)
+- 🔨 **ComplianceReporter** — Generic decision/denial/trust-range summary is shipped as `AuditLog.exportComplianceReport()`. Framework-specific reporters (EU AI Act Art. 13/14, OWASP ASI 2026, Singapore MGF, SLSA) are 📋 planned.
+- ✅ **Dashboard** — Real-time WebSocket UI with live KPIs, AEGIS panel, hover tooltips on every setting
 
 ---
 
@@ -195,11 +210,11 @@ You can also force a provider with `ODIN_LLM_PROVIDER=anthropic|openai|ollama|no
 
 The dashboard is served at `http://localhost:3333` (port configurable via `odin.yaml`). It renders live agent state over WebSocket — **no mocked values**.
 
-- **Identity & KPIs** — DID, trust mode, uptime, tokens used, installed skills, connected agents
-- **AEGIS panel** — IFC Engine, Supply Chain Scanner, Policy Engine, Trust Mesh with real-time metrics
-- **Activity log & Decision trace** — timestamped tool calls, chats, A2A interactions, Allow / Warn / Block decisions
-- **Settings** — LLM, Skills, MCP, Memory, Gateway, Security, Terminal, Cron — every form field has a hover tooltip describing what it does
-- **Compliance card** — EU AI Act, OWASP ASI, Singapore MGF coverage
+- ✅ **Identity & KPIs** — DID, trust mode, uptime, tokens used, installed skills, connected agents
+- ✅ **AEGIS panel** — IFC Engine, Supply Chain Scanner, Policy Engine, Trust Mesh with real-time metrics
+- ✅ **Activity log & Decision trace** — timestamped tool calls, chats, A2A interactions, Allow / Warn / Block decisions
+- ✅ **Settings** — LLM, Skills, MCP, Memory, Gateway, Security, Terminal, Cron — every form field has a hover tooltip describing what it does
+- 🔨 **Compliance card** — Renders totals and denial rates today. Framework-specific scoring (EU AI Act, OWASP ASI 2026, Singapore MGF) is 📋 planned.
 
 ---
 
@@ -242,18 +257,21 @@ All gateways share the `BaseGateway` abstract class: user allow-list, `@mention`
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Runtime | Node.js / TypeScript (ES2022) |
-| LLMs | Anthropic, OpenAI, Ollama, or none (NullAdapter) |
-| Database | SQLite + FTS5 + Merkle trees |
-| Security | IFC taint tracking, Cedar-style policies, Ed25519 (TweetNaCl) |
-| Sandbox | Docker / gVisor, Ring 0–2 |
-| Cognition | Graph episodic memory, MCTS + UCB1, Pearl SCM, TLA+-inspired invariants |
-| Observability | OpenTelemetry, WebSocket dashboard |
-| Monorepo | pnpm workspaces |
-| Testing | Vitest (150+ tests across core / security / trust / cognition) |
-| CI / Packaging | GitHub Actions, Dockerfile, docker-compose |
+| Component | Technology | Status |
+|-----------|-----------|--------|
+| Runtime | Node.js / TypeScript (ES2022) | ✅ |
+| LLMs | Anthropic, OpenAI, Ollama, or none (NullAdapter) | ✅ |
+| Database | SQLite + FTS5 + Merkle trees | ✅ |
+| Security | IFC taint tracking, Cedar-style policies, Ed25519 (TweetNaCl) | ✅ |
+| Sandbox | Ring 0–2 taxonomy + in-process timeout wrapper | 🔨 |
+| Sandbox (Docker / gVisor backend) | Container-based isolation | 📋 |
+| Cognition | Graph episodic memory, MCTS + UCB1, Pearl SCM, TLA+-inspired invariants | 🔨 |
+| Observability (OTel-compatible in-memory) | `DecisionTracer` emits OTel-shaped spans | ✅ |
+| Observability (OTel SDK exporter) | `@opentelemetry/*` integration | 📋 |
+| Dashboard | WebSocket real-time UI | ✅ |
+| Monorepo | pnpm workspaces | ✅ |
+| Testing | Vitest (150+ unit / adversarial tests across core / security / trust / cognition) | ✅ |
+| CI / Packaging | GitHub Actions, Dockerfile, docker-compose | ✅ |
 
 ---
 
