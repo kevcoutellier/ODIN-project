@@ -18,6 +18,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/security/package.json packages/security/
 COPY packages/trust/package.json packages/trust/
 COPY packages/cognition/package.json packages/cognition/
+COPY packages/observability/package.json packages/observability/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
 
@@ -47,6 +48,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/security/package.json packages/security/
 COPY packages/trust/package.json packages/trust/
 COPY packages/cognition/package.json packages/cognition/
+COPY packages/observability/package.json packages/observability/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
 
@@ -58,6 +60,7 @@ COPY --from=builder /app/packages/core/dist packages/core/dist
 COPY --from=builder /app/packages/security/dist packages/security/dist
 COPY --from=builder /app/packages/trust/dist packages/trust/dist
 COPY --from=builder /app/packages/cognition/dist packages/cognition/dist
+COPY --from=builder /app/packages/observability/dist packages/observability/dist
 COPY --from=builder /app/packages/cli/dist packages/cli/dist
 COPY --from=builder /app/packages/dashboard/dist packages/dashboard/dist
 COPY --from=builder /app/packages/dashboard/public packages/dashboard/public
